@@ -1,0 +1,53 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Publish: macOS (Apple Silicon)",
+            "type": "shell",
+            "command": "bash",
+            "args": ["publish-macos.sh", "arm64"],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Publish: macOS (Intel)",
+            "type": "shell",
+            "command": "bash",
+            "args": ["publish-macos.sh", "x64"],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Publish: Windows x64",
+            "type": "shell",
+            "command": "bash",
+            "args": ["publish-windows.sh", "x64"],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Publish: Windows ARM64",
+            "type": "shell",
+            "command": "bash",
+            "args": ["publish-windows.sh", "arm64"],
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": "$msCompile"
+        }
+    ]
+}

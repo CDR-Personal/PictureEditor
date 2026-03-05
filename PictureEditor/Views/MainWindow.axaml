@@ -1,0 +1,209 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:PictureEditor.ViewModels"
+        xmlns:v="using:PictureEditor.Views"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="1200" d:DesignHeight="800"
+        x:Class="PictureEditor.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="{Binding Title}"
+        Width="1200" Height="800"
+        MinWidth="800" MinHeight="600"
+        Icon="/Assets/app.ico"
+        Focusable="True">
+
+    <Design.DataContext>
+        <vm:MainWindowViewModel/>
+    </Design.DataContext>
+
+    <Window.KeyBindings>
+        <KeyBinding Gesture="Cmd+O" Command="{Binding OpenFileCommand}"/>
+        <KeyBinding Gesture="Cmd+Shift+O" Command="{Binding OpenFolderCommand}"/>
+        <KeyBinding Gesture="Cmd+S" Command="{Binding SaveCommand}"/>
+        <KeyBinding Gesture="Cmd+Shift+S" Command="{Binding SaveAsCommand}"/>
+        <KeyBinding Gesture="Cmd+Z" Command="{Binding UndoCommand}"/>
+        <KeyBinding Gesture="Cmd+L" Command="{Binding RotateLeftCommand}"/>
+        <KeyBinding Gesture="Cmd+R" Command="{Binding RotateRightCommand}"/>
+        <KeyBinding Gesture="Ctrl+O" Command="{Binding OpenFileCommand}"/>
+        <KeyBinding Gesture="Ctrl+Shift+O" Command="{Binding OpenFolderCommand}"/>
+        <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}"/>
+        <KeyBinding Gesture="Ctrl+Shift+S" Command="{Binding SaveAsCommand}"/>
+        <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoCommand}"/>
+        <KeyBinding Gesture="Ctrl+L" Command="{Binding RotateLeftCommand}"/>
+        <KeyBinding Gesture="Ctrl+R" Command="{Binding RotateRightCommand}"/>
+        <KeyBinding Gesture="Cmd+C" Command="{Binding ToggleCropModeCommand}"/>
+        <KeyBinding Gesture="Ctrl+C" Command="{Binding ToggleCropModeCommand}"/>
+        <KeyBinding Gesture="Cmd+Shift+A" Command="{Binding AutoColorCommand}"/>
+        <KeyBinding Gesture="Ctrl+Shift+A" Command="{Binding AutoColorCommand}"/>
+    </Window.KeyBindings>
+
+    <DockPanel>
+        <!-- Menu Bar -->
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Open File..." Command="{Binding OpenFileCommand}" InputGesture="Cmd+O"/>
+                <MenuItem Header="Open _Folder..." Command="{Binding OpenFolderCommand}" InputGesture="Cmd+Shift+O"/>
+                <Separator/>
+                <MenuItem Header="_Save" Command="{Binding SaveCommand}" InputGesture="Cmd+S"/>
+                <MenuItem Header="Save _As..." Command="{Binding SaveAsCommand}" InputGesture="Cmd+Shift+S"/>
+            </MenuItem>
+            <MenuItem Header="_Edit">
+                <MenuItem Header="_Undo" Command="{Binding UndoCommand}" InputGesture="Cmd+Z"/>
+                <Separator/>
+                <MenuItem Header="Rotate _Left" Command="{Binding RotateLeftCommand}" InputGesture="Cmd+L"/>
+                <MenuItem Header="Rotate _Right" Command="{Binding RotateRightCommand}" InputGesture="Cmd+R"/>
+                <MenuItem Header="_Crop" Command="{Binding ToggleCropModeCommand}" InputGesture="Cmd+C"/>
+                <MenuItem Header="Re_size" Command="{Binding ToggleResizeModeCommand}"/>
+                <MenuItem Header="_Adjustments" Command="{Binding ToggleAdjustModeCommand}"/>
+                <Separator/>
+                <MenuItem Header="A_uto Color" Command="{Binding AutoColorCommand}" InputGesture="Cmd+Shift+A"/>
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="_Keyboard Shortcuts" InputGesture="F1" Click="OnHelpClick"/>
+            </MenuItem>
+        </Menu>
+
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                Padding="6,4">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+                <Button Content="Open File" Command="{Binding OpenFileCommand}" ToolTip.Tip="Open image file (Cmd+O)"/>
+                <Button Content="Open Folder" Command="{Binding OpenFolderCommand}" ToolTip.Tip="Open folder (Cmd+Shift+O)"/>
+                <Border Width="1" Background="Gray" Margin="4,2"/>
+                <Button Content="Undo" Command="{Binding UndoCommand}" IsEnabled="{Binding CanUndo}" ToolTip.Tip="Undo (Cmd+Z)"/>
+                <Border Width="1" Background="Gray" Margin="4,2"/>
+                <Button Content="Rotate Left" Command="{Binding RotateLeftCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Rotate left (Cmd+L)"/>
+                <Button Content="Rotate Right" Command="{Binding RotateRightCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Rotate right (Cmd+R)"/>
+                <Button Content="Crop" Command="{Binding ToggleCropModeCommand}" IsEnabled="{Binding HasImage}"/>
+                <Button Content="Resize" Command="{Binding ToggleResizeModeCommand}" IsEnabled="{Binding HasImage}"/>
+                <Button Content="Adjust" Command="{Binding ToggleAdjustModeCommand}" IsEnabled="{Binding HasImage}"/>
+                <Button Content="Auto Color" Command="{Binding AutoColorCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Automatic color correction (Cmd+Shift+A)"/>
+                <Border Width="1" Background="Gray" Margin="4,2"/>
+                <Button Content="Save" Command="{Binding SaveCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Save (Cmd+S)"/>
+                <Button Content="Save As" Command="{Binding SaveAsCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Save As (Cmd+Shift+S)"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Status Bar -->
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                Padding="8,4">
+            <DockPanel>
+                <TextBlock Text="{Binding ImageDimensions}" DockPanel.Dock="Right" Margin="8,0"/>
+                <TextBlock Text="{Binding StatusText}"/>
+            </DockPanel>
+        </Border>
+
+        <!-- Side Panel: Crop -->
+        <Border DockPanel.Dock="Right" Width="260"
+                Background="{DynamicResource SystemControlBackgroundChromeLowBrush}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                BorderThickness="1,0,0,0"
+                Padding="12"
+                IsVisible="{Binding IsCropMode}">
+            <StackPanel Spacing="10">
+                <TextBlock Text="Crop" FontSize="18" FontWeight="Bold"/>
+                <TextBlock Text="Drag on the image to select crop area." Opacity="0.7" TextWrapping="Wrap" FontSize="12"/>
+
+                <TextBlock Text="X:"/>
+                <NumericUpDown Value="{Binding CropX}" Minimum="0" Increment="1" FormatString="0"/>
+
+                <TextBlock Text="Y:"/>
+                <NumericUpDown Value="{Binding CropY}" Minimum="0" Increment="1" FormatString="0"/>
+
+                <TextBlock Text="Width:"/>
+                <NumericUpDown Value="{Binding CropWidth}" Minimum="1" Increment="1" FormatString="0"/>
+
+                <TextBlock Text="Height:"/>
+                <NumericUpDown Value="{Binding CropHeight}" Minimum="1" Increment="1" FormatString="0"/>
+
+                <TextBlock Text="Press Enter to apply crop. Escape to cancel." Opacity="0.5" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Side Panel: Resize -->
+        <Border DockPanel.Dock="Right" Width="260"
+                Background="{DynamicResource SystemControlBackgroundChromeLowBrush}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                BorderThickness="1,0,0,0"
+                Padding="12"
+                IsVisible="{Binding IsResizeMode}">
+            <StackPanel Spacing="10">
+                <TextBlock Text="Resize" FontSize="18" FontWeight="Bold"/>
+                <TextBlock Text="{Binding ImageDimensions, StringFormat='Current: {0}'}" Opacity="0.7"/>
+
+                <TextBlock Text="Scale Percentage:"/>
+                <NumericUpDown Value="{Binding ResizePercentage}" Minimum="1" Maximum="500" Increment="5" FormatString="0"/>
+                <Slider Value="{Binding ResizePercentage}" Minimum="1" Maximum="500"/>
+
+                <TextBlock Text="Changes apply in real-time. Escape to cancel." Opacity="0.5" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Side Panel: Adjustments -->
+        <Border DockPanel.Dock="Right" Width="280"
+                Background="{DynamicResource SystemControlBackgroundChromeLowBrush}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                BorderThickness="1,0,0,0"
+                Padding="12"
+                IsVisible="{Binding IsAdjustMode}">
+            <ScrollViewer>
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Adjustments" FontSize="18" FontWeight="Bold"/>
+
+                    <TextBlock Text="{Binding BrightnessValue, StringFormat='Brightness: {0:F2}'}"/>
+                    <Slider Value="{Binding BrightnessValue}" Minimum="0.0" Maximum="2.0" TickFrequency="0.01"/>
+
+                    <TextBlock Text="{Binding ContrastValue, StringFormat='Contrast: {0:F2}'}"/>
+                    <Slider Value="{Binding ContrastValue}" Minimum="0.0" Maximum="2.0" TickFrequency="0.01"/>
+
+                    <TextBlock Text="{Binding SaturationValue, StringFormat='Saturation: {0:F2}'}"/>
+                    <Slider Value="{Binding SaturationValue}" Minimum="0.0" Maximum="3.0" TickFrequency="0.01"/>
+
+                    <TextBlock Text="{Binding HueValue, StringFormat='Hue: {0:F0} degrees'}"/>
+                    <Slider Value="{Binding HueValue}" Minimum="-180" Maximum="180" TickFrequency="1"/>
+
+                    <TextBlock Text="{Binding GammaValue, StringFormat='Gamma: {0:F2}'}"/>
+                    <Slider Value="{Binding GammaValue}" Minimum="0.1" Maximum="3.0" TickFrequency="0.01"/>
+
+                    <TextBlock Text="Changes apply in real-time. Escape to cancel." Opacity="0.5" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Main Image Area -->
+        <Border Background="#1e1e1e">
+            <Panel>
+                <TextBlock Text="Open a file or directory to begin editing"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Foreground="#888" FontSize="16"
+                           IsVisible="{Binding !HasImage}"/>
+
+                <!-- Image display (no ScrollViewer - shrinks to fit) -->
+                <Panel IsVisible="{Binding HasImage}" Margin="10">
+                    <Image Source="{Binding DisplayImage}"
+                           x:Name="MainImage"
+                           Stretch="Uniform"
+                           RenderOptions.BitmapInterpolationMode="HighQuality"/>
+
+                    <!-- Crop overlay: sits exactly on top of the image -->
+                    <v:CropOverlay x:Name="CropOverlayControl"
+                                   IsVisible="{Binding IsCropMode}"
+                                   CropX="{Binding CropX, Mode=TwoWay}"
+                                   CropY="{Binding CropY, Mode=TwoWay}"
+                                   CropWidth="{Binding CropWidth, Mode=TwoWay}"
+                                   CropHeight="{Binding CropHeight, Mode=TwoWay}"
+                                   ImagePixelWidth="{Binding ImagePixelWidthValue}"
+                                   ImagePixelHeight="{Binding ImagePixelHeightValue}"/>
+                </Panel>
+
+                <!-- Navigation hints -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
+                            VerticalAlignment="Bottom" Margin="0,0,0,8"
+                            IsVisible="{Binding HasImage}" Opacity="0.5">
+                    <TextBlock Text="Use Left/Right arrow keys to navigate images" FontSize="12" Foreground="#aaa"/>
+                </StackPanel>
+            </Panel>
+        </Border>
+    </DockPanel>
+</Window>
