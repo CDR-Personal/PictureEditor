@@ -36,13 +36,28 @@ public class CropOverlay : Control
     private static readonly IPen BorderPenShadow = new Pen(new SolidColorBrush(Color.FromArgb(128, 0, 0, 0)), 2);
     private static readonly IBrush HandleFill = Brushes.White;
     private static readonly IPen HandlePen = new Pen(new SolidColorBrush(Color.FromArgb(200, 0, 0, 0)), 1);
+    private static readonly IPen ThirdsPen = new Pen(new SolidColorBrush(Color.FromArgb(80, 255, 255, 255)), 1);
+    private static readonly IBrush LabelBackgroundBrush = new SolidColorBrush(Color.FromArgb(180, 0, 0, 0));
+    private static readonly Typeface LabelTypeface = new("Inter", FontStyle.Normal, FontWeight.Normal);
     private const double HandleSize = 10;
     private const double EdgeHitSize = 14;
+
+    // Cached cursors to avoid allocations on every mouse move
+    private static readonly Cursor CursorCross = new(StandardCursorType.Cross);
+    private static readonly Cursor CursorSizeAll = new(StandardCursorType.SizeAll);
+    private static readonly Cursor CursorTopLeft = new(StandardCursorType.TopLeftCorner);
+    private static readonly Cursor CursorTopRight = new(StandardCursorType.TopRightCorner);
+    private static readonly Cursor CursorNS = new(StandardCursorType.SizeNorthSouth);
+    private static readonly Cursor CursorWE = new(StandardCursorType.SizeWestEast);
 
     private enum DragMode { None, Move, TopLeft, Top, TopRight, Right, BottomRight, Bottom, BottomLeft, Left, NewSelection }
     private DragMode _dragMode = DragMode.None;
     private Point _dragStart;
     private Rect _cropAtDragStart;
+
+    // Cached label text to avoid allocation on every render
+    private FormattedText? _cachedLabelText;
+    private int _cachedLabelW, _cachedLabelH;
 
     static CropOverlay()
     {
@@ -53,7 +68,7 @@ public class CropOverlay : Control
     public CropOverlay()
     {
         ClipToBounds = true;
-        Cursor = new Cursor(StandardCursorType.Cross);
+        Cursor = CursorCross;
     }
 
     // Convert image pixel rect to screen rect
@@ -122,13 +137,12 @@ public class CropOverlay : Control
         context.DrawRectangle(BorderPen, cropScreen);
 
         // Draw rule-of-thirds lines
-        var thirdPen = new Pen(new SolidColorBrush(Color.FromArgb(80, 255, 255, 255)), 1);
         for (int i = 1; i <= 2; i++)
         {
             double x = cropScreen.Left + cropScreen.Width * i / 3.0;
             double y = cropScreen.Top + cropScreen.Height * i / 3.0;
-            context.DrawLine(thirdPen, new Point(x, cropScreen.Top), new Point(x, cropScreen.Bottom));
-            context.DrawLine(thirdPen, new Point(cropScreen.Left, y), new Point(cropScreen.Right, y));
+            context.DrawLine(ThirdsPen, new Point(x, cropScreen.Top), new Point(x, cropScreen.Bottom));
+            context.DrawLine(ThirdsPen, new Point(cropScreen.Left, y), new Point(cropScreen.Right, y));
         }
 
         // Draw 8 resize handles
@@ -141,21 +155,25 @@ public class CropOverlay : Control
         DrawHandle(context, new Point(cropScreen.Left, cropScreen.Center.Y));
         DrawHandle(context, new Point(cropScreen.Right, cropScreen.Center.Y));
 
-        // Draw dimensions label
-        var text = new FormattedText(
-            $"{CropWidth} x {CropHeight}",
-            System.Globalization.CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight,
-            new Typeface("Inter", FontStyle.Normal, FontWeight.Normal),
-            12, Brushes.White);
-        double labelX = cropScreen.Center.X - text.Width / 2;
+        // Draw dimensions label (cache FormattedText when dimensions unchanged)
+        if (_cachedLabelText == null || _cachedLabelW != CropWidth || _cachedLabelH != CropHeight)
+        {
+            _cachedLabelW = CropWidth;
+            _cachedLabelH = CropHeight;
+            _cachedLabelText = new FormattedText(
+                $"{CropWidth} x {CropHeight}",
+                System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight,
+                LabelTypeface,
+                12, Brushes.White);
+        }
+        double labelX = cropScreen.Center.X - _cachedLabelText.Width / 2;
         double labelY = cropScreen.Bottom + 6;
-        if (labelY + text.Height > Bounds.Height)
-            labelY = cropScreen.Top - text.Height - 6;
-        // Background for readability
-        context.FillRectangle(new SolidColorBrush(Color.FromArgb(180, 0, 0, 0)),
-            new Rect(labelX - 4, labelY - 2, text.Width + 8, text.Height + 4), 3);
-        context.DrawText(text, new Point(labelX, labelY));
+        if (labelY + _cachedLabelText.Height > Bounds.Height)
+            labelY = cropScreen.Top - _cachedLabelText.Height - 6;
+        context.FillRectangle(LabelBackgroundBrush,
+            new Rect(labelX - 4, labelY - 2, _cachedLabelText.Width + 8, _cachedLabelText.Height + 4), 3);
+        context.DrawText(_cachedLabelText, new Point(labelX, labelY));
     }
 
     private static void DrawHandle(DrawingContext context, Point center)
@@ -207,12 +225,12 @@ public class CropOverlay : Control
             var hit = HitTest(pos, cropScreen);
             Cursor = hit switch
             {
-                DragMode.Move => new Cursor(StandardCursorType.SizeAll),
-                DragMode.TopLeft or DragMode.BottomRight => new Cursor(StandardCursorType.TopLeftCorner),
-                DragMode.TopRight or DragMode.BottomLeft => new Cursor(StandardCursorType.TopRightCorner),
-                DragMode.Top or DragMode.Bottom => new Cursor(StandardCursorType.SizeNorthSouth),
-                DragMode.Left or DragMode.Right => new Cursor(StandardCursorType.SizeWestEast),
-                _ => new Cursor(StandardCursorType.Cross)
+                DragMode.Move => CursorSizeAll,
+                DragMode.TopLeft or DragMode.BottomRight => CursorTopLeft,
+                DragMode.TopRight or DragMode.BottomLeft => CursorTopRight,
+                DragMode.Top or DragMode.Bottom => CursorNS,
+                DragMode.Left or DragMode.Right => CursorWE,
+                _ => CursorCross
             };
             return;
         }

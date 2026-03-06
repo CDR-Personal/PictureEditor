@@ -32,8 +32,8 @@
         <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoCommand}"/>
         <KeyBinding Gesture="Ctrl+L" Command="{Binding RotateLeftCommand}"/>
         <KeyBinding Gesture="Ctrl+R" Command="{Binding RotateRightCommand}"/>
-        <KeyBinding Gesture="Cmd+C" Command="{Binding ToggleCropModeCommand}"/>
-        <KeyBinding Gesture="Ctrl+C" Command="{Binding ToggleCropModeCommand}"/>
+        <KeyBinding Gesture="Cmd+Shift+C" Command="{Binding ToggleCropModeCommand}"/>
+        <KeyBinding Gesture="Ctrl+Shift+C" Command="{Binding ToggleCropModeCommand}"/>
         <KeyBinding Gesture="Cmd+Shift+A" Command="{Binding AutoColorCommand}"/>
         <KeyBinding Gesture="Ctrl+Shift+A" Command="{Binding AutoColorCommand}"/>
     </Window.KeyBindings>
@@ -53,7 +53,7 @@
                 <Separator/>
                 <MenuItem Header="Rotate _Left" Command="{Binding RotateLeftCommand}" InputGesture="Cmd+L"/>
                 <MenuItem Header="Rotate _Right" Command="{Binding RotateRightCommand}" InputGesture="Cmd+R"/>
-                <MenuItem Header="_Crop" Command="{Binding ToggleCropModeCommand}" InputGesture="Cmd+C"/>
+                <MenuItem Header="_Crop" Command="{Binding ToggleCropModeCommand}" InputGesture="Cmd+Shift+C"/>
                 <MenuItem Header="Re_size" Command="{Binding ToggleResizeModeCommand}"/>
                 <MenuItem Header="_Adjustments" Command="{Binding ToggleAdjustModeCommand}"/>
                 <Separator/>
@@ -184,7 +184,7 @@
                     <Image Source="{Binding DisplayImage}"
                            x:Name="MainImage"
                            Stretch="Uniform"
-                           RenderOptions.BitmapInterpolationMode="HighQuality"/>
+                           RenderOptions.BitmapInterpolationMode="MediumQuality"/>
 
                     <!-- Crop overlay: sits exactly on top of the image -->
                     <v:CropOverlay x:Name="CropOverlayControl"

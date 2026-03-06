@@ -1,80 +1,154 @@
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Advanced;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 
 namespace PictureEditor.Services;
 
 public class ImageEditorService : IDisposable
 {
     private Image<Rgba32>? _currentImage;
-    private readonly Stack<byte[]> _undoStack = new();
+    private Image<Rgba32>? _previewBase;
+
+    // Circular undo buffer — O(1) push and trim
     private const int MaxUndoSteps = 5;
-    private byte[]? _previewBase;
+    private readonly Image<Rgba32>?[] _undoRing = new Image<Rgba32>?[MaxUndoSteps];
+    private int _undoHead; // next write position
+    private int _undoCount;
 
     private static readonly string[] SupportedExtensions = { ".jpg", ".jpeg", ".png", ".webp" };
 
     public int ImageWidth => _currentImage?.Width ?? 0;
     public int ImageHeight => _currentImage?.Height ?? 0;
     public bool HasImage => _currentImage != null;
-    public bool CanUndo => _undoStack.Count > 0;
+    public bool CanUndo => _undoCount > 0;
     public bool HasPreviewBase => _previewBase != null;
 
     public void LoadImage(string filePath)
     {
         _currentImage?.Dispose();
-        _undoStack.Clear();
-        DiscardPreviewBase();
+        ClearUndoRing();
+        _previewBase?.Dispose();
+        _previewBase = null;
         _currentImage = Image.Load<Rgba32>(filePath);
     }
 
-    public byte[] GetCurrentImageBytes()
+    /// <summary>
+    /// Writes pixel data directly into a caller-provided BGRA buffer (e.g. a locked WriteableBitmap).
+    /// Uses SIMD Vector to swap R/B channels when possible.
+    /// </summary>
+    public unsafe bool CopyPixelsToBgraDirect(IntPtr destination, int destStride)
     {
-        if (_currentImage == null) return Array.Empty<byte>();
-        using var ms = new MemoryStream();
-        _currentImage.SaveAsPng(ms);
-        return ms.ToArray();
+        if (_currentImage == null) return false;
+        int w = _currentImage.Width;
+        int h = _currentImage.Height;
+
+        _currentImage.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < accessor.Height; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                byte* destRow = (byte*)destination + (long)y * destStride;
+                var destSpan = new Span<byte>(destRow, w * 4);
+
+                // Reinterpret Rgba32 row as bytes
+                var srcBytes = MemoryMarshal.AsBytes(row);
+
+                // SIMD RGBA→BGRA swizzle
+                SwizzleRgbaToBgra(srcBytes, destSpan);
+            }
+        });
+        return true;
     }
 
-    private void PushUndo(byte[]? specificState = null)
+    /// <summary>
+    /// Swaps R and B channels from RGBA source to BGRA destination using SIMD where available.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void SwizzleRgbaToBgra(ReadOnlySpan<byte> src, Span<byte> dst)
     {
-        if (specificState != null)
+        int pixelCount = src.Length / 4;
+        int i = 0;
+
+        // Process 4 pixels at a time using Vector128 if available
+        if (Vector.IsHardwareAccelerated && pixelCount >= Vector<uint>.Count)
         {
-            _undoStack.Push(specificState);
+            var srcUints = MemoryMarshal.Cast<byte, uint>(src);
+            var dstUints = MemoryMarshal.Cast<byte, uint>(dst);
+
+            // Masks for extracting and shifting channels
+            // RGBA (little-endian memory): byte0=R, byte1=G, byte2=B, byte3=A
+            // BGRA (little-endian memory): byte0=B, byte1=G, byte2=R, byte3=A
+            var maskGA = new Vector<uint>(0xFF00FF00u); // green + alpha
+            var maskR  = new Vector<uint>(0x000000FFu); // red channel
+            var maskB  = new Vector<uint>(0x00FF0000u); // blue channel
+
+            int vecCount = srcUints.Length - (srcUints.Length % Vector<uint>.Count);
+            for (i = 0; i < vecCount; i += Vector<uint>.Count)
+            {
+                var v = new Vector<uint>(srcUints.Slice(i));
+                var ga = v & maskGA;     // keep G and A
+                var r = (v & maskR) << 16;  // move R to B position
+                var b = (v & maskB) >> 16;  // move B to R position
+                var result = ga | r | b;
+                result.CopyTo(dstUints.Slice(i));
+            }
+            i *= 4; // convert back to byte index
         }
-        else
+
+        // Scalar fallback for remaining pixels
+        for (; i + 3 < src.Length; i += 4)
         {
-            if (_currentImage == null) return;
-            using var ms = new MemoryStream();
-            _currentImage.SaveAsPng(ms);
-            _undoStack.Push(ms.ToArray());
+            dst[i]     = src[i + 2]; // B
+            dst[i + 1] = src[i + 1]; // G
+            dst[i + 2] = src[i];     // R
+            dst[i + 3] = src[i + 3]; // A
         }
-        TrimUndoStack();
     }
 
-    private void TrimUndoStack()
+    // --- Circular undo buffer ---
+
+    private void PushUndo(Image<Rgba32>? specificState = null)
     {
-        while (_undoStack.Count > MaxUndoSteps)
+        // Dispose whatever is in the slot we're about to overwrite
+        _undoRing[_undoHead]?.Dispose();
+        _undoRing[_undoHead] = specificState ?? _currentImage?.Clone();
+        _undoHead = (_undoHead + 1) % MaxUndoSteps;
+        if (_undoCount < MaxUndoSteps)
+            _undoCount++;
+    }
+
+    private void ClearUndoRing()
+    {
+        for (int i = 0; i < MaxUndoSteps; i++)
         {
-            var items = _undoStack.ToArray();
-            _undoStack.Clear();
-            for (int i = 0; i < items.Length - 1; i++)
-                _undoStack.Push(items[items.Length - 2 - i]);
+            _undoRing[i]?.Dispose();
+            _undoRing[i] = null;
         }
+        _undoHead = 0;
+        _undoCount = 0;
     }
 
     public bool Undo()
     {
-        if (_undoStack.Count == 0 || _currentImage == null) return false;
-        var previousState = _undoStack.Pop();
+        if (_undoCount == 0 || _currentImage == null) return false;
+        _undoHead = (_undoHead - 1 + MaxUndoSteps) % MaxUndoSteps;
+        _undoCount--;
         _currentImage.Dispose();
-        _currentImage = Image.Load<Rgba32>(previousState);
+        _currentImage = _undoRing[_undoHead];
+        _undoRing[_undoHead] = null;
         return true;
     }
 
@@ -82,14 +156,37 @@ public class ImageEditorService : IDisposable
 
     public void SavePreviewBase()
     {
-        _previewBase = GetCurrentImageBytes();
+        _previewBase?.Dispose();
+        _previewBase = _currentImage?.Clone();
     }
 
+    /// <summary>
+    /// Fast restore: copies pixel data from preview base into current image
+    /// without allocating a new Image. Falls back to clone if dimensions differ.
+    /// </summary>
     public void RestoreFromPreviewBase()
     {
         if (_previewBase == null || _currentImage == null) return;
-        _currentImage.Dispose();
-        _currentImage = Image.Load<Rgba32>(_previewBase);
+
+        if (_currentImage.Width == _previewBase.Width && _currentImage.Height == _previewBase.Height)
+        {
+            // Fast path: copy pixel rows directly
+            _previewBase.ProcessPixelRows(_currentImage, (srcAcc, dstAcc) =>
+            {
+                for (int y = 0; y < srcAcc.Height; y++)
+                {
+                    var srcRow = srcAcc.GetRowSpan(y);
+                    var dstRow = dstAcc.GetRowSpan(y);
+                    srcRow.CopyTo(dstRow);
+                }
+            });
+        }
+        else
+        {
+            // Dimensions changed (e.g. resize preview) — must reallocate
+            _currentImage.Dispose();
+            _currentImage = _previewBase.Clone();
+        }
     }
 
     public void CommitPreview()
@@ -103,36 +200,159 @@ public class ImageEditorService : IDisposable
     {
         if (_previewBase == null) return;
         _currentImage?.Dispose();
-        _currentImage = Image.Load<Rgba32>(_previewBase);
+        _currentImage = _previewBase;
         _previewBase = null;
     }
 
-    // --- Operations without undo (used during real-time preview) ---
+    // --- Single-pass adjustments (combines brightness, contrast, saturation, hue, gamma) ---
 
     public void ApplyAdjustmentsNoUndo(float brightness, float contrast, float saturation, float hue, float gamma)
     {
         if (_currentImage == null) return;
-        _currentImage.Mutate(ctx =>
+
+        bool hasBrightness = MathF.Abs(brightness - 1f) > 0.01f;
+        bool hasContrast = MathF.Abs(contrast - 1f) > 0.01f;
+        bool hasSaturation = MathF.Abs(saturation - 1f) > 0.01f;
+        bool hasHue = MathF.Abs(hue) > 0.5f;
+        bool hasGamma = MathF.Abs(gamma - 1f) > 0.01f;
+
+        if (!hasBrightness && !hasContrast && !hasSaturation && !hasHue && !hasGamma)
+            return;
+
+        // Build a combined LUT for brightness + contrast + gamma
+        // These are per-channel operations that can be composed into a single lookup
+        bool hasLut = hasBrightness || hasContrast || hasGamma;
+        byte[]? lut = null;
+
+        if (hasLut)
         {
-            if (Math.Abs(brightness - 1f) > 0.01f) ctx.Brightness(brightness);
-            if (Math.Abs(contrast - 1f) > 0.01f) ctx.Contrast(contrast);
-            if (Math.Abs(saturation - 1f) > 0.01f) ctx.Saturate(saturation);
-            if (Math.Abs(hue) > 0.5f) ctx.Hue(hue);
-        });
-        if (Math.Abs(gamma - 1f) > 0.01f)
-        {
-            _currentImage.Mutate(x => x.ProcessPixelRowsAsVector4(row =>
+            lut = ArrayPool<byte>.Shared.Rent(256);
+            float invGamma = hasGamma ? 1f / gamma : 1f;
+            for (int i = 0; i < 256; i++)
             {
-                for (int i = 0; i < row.Length; i++)
-                {
-                    var pixel = row[i];
-                    pixel.X = MathF.Pow(pixel.X, 1f / gamma);
-                    pixel.Y = MathF.Pow(pixel.Y, 1f / gamma);
-                    pixel.Z = MathF.Pow(pixel.Z, 1f / gamma);
-                    row[i] = pixel;
-                }
-            }));
+                float v = i / 255f;
+
+                // Brightness: multiply
+                if (hasBrightness) v *= brightness;
+
+                // Contrast: scale around 0.5
+                if (hasContrast) v = ((v - 0.5f) * contrast) + 0.5f;
+
+                // Gamma: power curve
+                if (hasGamma && v > 0f) v = MathF.Pow(v, invGamma);
+
+                lut[i] = (byte)Math.Clamp((int)(v * 255f + 0.5f), 0, 255);
+            }
         }
+
+        bool needsHsl = hasSaturation || hasHue;
+        float hueRadians = hasHue ? hue * MathF.PI / 180f : 0f;
+
+        _currentImage.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < accessor.Height; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (int x = 0; x < row.Length; x++)
+                {
+                    ref var p = ref row[x];
+                    byte r = p.R, g = p.G, b = p.B;
+
+                    // Apply LUT (brightness + contrast + gamma combined)
+                    if (lut != null)
+                    {
+                        r = lut[r];
+                        g = lut[g];
+                        b = lut[b];
+                    }
+
+                    // Apply saturation and hue in HSL space (single conversion)
+                    if (needsHsl)
+                    {
+                        RgbToHsl(r, g, b, out float h, out float s, out float l);
+                        if (hasHue) h = (h + hueRadians) % (2f * MathF.PI);
+                        if (hasSaturation) s = Math.Clamp(s * saturation, 0f, 1f);
+                        HslToRgb(h, s, l, out r, out g, out b);
+                    }
+
+                    p = new Rgba32(r, g, b, p.A);
+                }
+            }
+        });
+
+        if (lut != null)
+            ArrayPool<byte>.Shared.Return(lut);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void RgbToHsl(byte ri, byte gi, byte bi, out float h, out float s, out float l)
+    {
+        float r = ri / 255f, g = gi / 255f, b = bi / 255f;
+        float max = MathF.Max(r, MathF.Max(g, b));
+        float min = MathF.Min(r, MathF.Min(g, b));
+        float delta = max - min;
+        l = (max + min) * 0.5f;
+
+        if (delta < 1e-6f)
+        {
+            h = 0f;
+            s = 0f;
+            return;
+        }
+
+        s = l > 0.5f ? delta / (2f - max - min) : delta / (max + min);
+
+        if (max == r)
+            h = ((g - b) / delta) + (g < b ? 6f : 0f);
+        else if (max == g)
+            h = ((b - r) / delta) + 2f;
+        else
+            h = ((r - g) / delta) + 4f;
+
+        h *= MathF.PI / 3f; // convert to radians (sector * 60° in radians)
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void HslToRgb(float h, float s, float l, out byte ro, out byte go, out byte bo)
+    {
+        if (s < 1e-6f)
+        {
+            byte v = (byte)Math.Clamp((int)(l * 255f + 0.5f), 0, 255);
+            ro = go = bo = v;
+            return;
+        }
+
+        float q = l < 0.5f ? l * (1f + s) : l + s - l * s;
+        float p = 2f * l - q;
+        float oneThird = 2f * MathF.PI / 3f;
+
+        ro = HueToRgbByte(p, q, h + oneThird);
+        go = HueToRgbByte(p, q, h);
+        bo = HueToRgbByte(p, q, h - oneThird);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static byte HueToRgbByte(float p, float q, float t)
+    {
+        float twoPi = 2f * MathF.PI;
+        if (t < 0f) t += twoPi;
+        if (t > twoPi) t -= twoPi;
+
+        float sixthPi = MathF.PI / 3f;
+        float halfPi2 = MathF.PI; // 180 degrees = pi
+        float twoThirdsPi2 = 2f * MathF.PI * 2f / 3f; // 240 degrees
+
+        float v;
+        if (t < sixthPi)
+            v = p + (q - p) * (t / sixthPi);
+        else if (t < halfPi2)
+            v = q;
+        else if (t < twoThirdsPi2)
+            v = p + (q - p) * ((twoThirdsPi2 - t) / sixthPi);
+        else
+            v = p;
+
+        return (byte)Math.Clamp((int)(v * 255f + 0.5f), 0, 255);
     }
 
     public void ResizeNoUndo(double percentage)
@@ -165,27 +385,41 @@ public class ImageEditorService : IDisposable
         if (_currentImage == null) return;
         PushUndo();
 
-        // Build per-channel histograms
+        int height = _currentImage.Height;
+        var img = _currentImage;
+
+        // Build per-channel histograms using parallel row processing with thread-local accumulators
         int[] histR = new int[256], histG = new int[256], histB = new int[256];
-        _currentImage.ProcessPixelRows(accessor =>
-        {
-            for (int y = 0; y < accessor.Height; y++)
+        Parallel.For(0, height,
+            () => (r: new int[256], g: new int[256], b: new int[256]),
+            (y, _, local) =>
             {
-                var row = accessor.GetRowSpan(y);
+                var row = img.DangerousGetPixelRowMemory(y).Span;
                 for (int x = 0; x < row.Length; x++)
                 {
-                    histR[row[x].R]++;
-                    histG[row[x].G]++;
-                    histB[row[x].B]++;
+                    local.r[row[x].R]++;
+                    local.g[row[x].G]++;
+                    local.b[row[x].B]++;
                 }
-            }
-        });
+                return local;
+            },
+            local =>
+            {
+                lock (histR)
+                {
+                    for (int i = 0; i < 256; i++)
+                    {
+                        histR[i] += local.r[i];
+                        histG[i] += local.g[i];
+                        histB[i] += local.b[i];
+                    }
+                }
+            });
 
-        int totalPixels = _currentImage.Width * _currentImage.Height;
-        float clipPercent = 0.005f; // clip 0.5% from each end
+        int totalPixels = _currentImage.Width * height;
+        float clipPercent = 0.005f;
         int clipCount = (int)(totalPixels * clipPercent);
 
-        // Find clipped min/max for each channel
         (byte min, byte max) FindRange(int[] hist)
         {
             int cumLow = 0, cumHigh = 0;
@@ -208,21 +442,18 @@ public class ImageEditorService : IDisposable
         var (gMin, gMax) = FindRange(histG);
         var (bMin, bMax) = FindRange(histB);
 
-        // Build lookup tables for each channel
         byte[] lutR = BuildLut(rMin, rMax);
         byte[] lutG = BuildLut(gMin, gMax);
         byte[] lutB = BuildLut(bMin, bMax);
 
-        // Apply the LUTs
-        _currentImage.ProcessPixelRows(accessor =>
+        // Apply the LUTs in parallel
+        Parallel.For(0, height, y =>
         {
-            for (int y = 0; y < accessor.Height; y++)
+            var row = img.DangerousGetPixelRowMemory(y).Span;
+            for (int x = 0; x < row.Length; x++)
             {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < row.Length; x++)
-                {
-                    row[x] = new Rgba32(lutR[row[x].R], lutG[row[x].G], lutB[row[x].B], row[x].A);
-                }
+                ref var p = ref row[x];
+                p = new Rgba32(lutR[p.R], lutG[p.G], lutB[p.B], p.A);
             }
         });
     }
@@ -278,7 +509,7 @@ public class ImageEditorService : IDisposable
     public static List<string> GetImagesInDirectory(string directoryPath)
     {
         if (!Directory.Exists(directoryPath)) return new List<string>();
-        return Directory.GetFiles(directoryPath)
+        return Directory.EnumerateFiles(directoryPath)
             .Where(f => SupportedExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
             .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -292,5 +523,7 @@ public class ImageEditorService : IDisposable
     public void Dispose()
     {
         _currentImage?.Dispose();
+        ClearUndoRing();
+        _previewBase?.Dispose();
     }
 }

@@ -1,10 +1,13 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using PictureEditor.Services;
 using PictureEditor.ViewModels;
 using System;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -48,6 +51,9 @@ public partial class MainWindow : Window
             _settings.Height = Height;
         }
         _settings.Save();
+
+        // Dispose the ViewModel to release image resources
+        (DataContext as IDisposable)?.Dispose();
     }
 
     protected override void OnDataContextChanged(EventArgs e)
@@ -60,6 +66,21 @@ public partial class MainWindow : Window
             vm.OpenFolderDialog = ShowOpenFolderDialog;
             vm.SaveFileDialog = ShowSaveFileDialog;
             vm.ConfirmDialog = ShowConfirmDialog;
+
+            // Subscribe to IsPreviewActive changes for adaptive interpolation quality
+            vm.PropertyChanged += OnViewModelPropertyChanged;
+        }
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainWindowViewModel.IsPreviewActive))
+        {
+            var vm = (MainWindowViewModel)sender!;
+            var quality = vm.IsPreviewActive
+                ? BitmapInterpolationMode.LowQuality
+                : BitmapInterpolationMode.MediumQuality;
+            RenderOptions.SetBitmapInterpolationMode(MainImage, quality);
         }
     }
 
@@ -76,14 +97,14 @@ public partial class MainWindow : Window
             case Key.Left:
                 if (!inputHasFocus)
                 {
-                    _ = vm.NavigateImage(-1);
+                    HandleNavigateAsync(vm, -1);
                     e.Handled = true;
                 }
                 break;
             case Key.Right:
                 if (!inputHasFocus)
                 {
-                    _ = vm.NavigateImage(1);
+                    HandleNavigateAsync(vm, 1);
                     e.Handled = true;
                 }
                 break;
@@ -98,7 +119,6 @@ public partial class MainWindow : Window
                 if (vm.IsCropMode || vm.IsResizeMode || vm.IsAdjustMode)
                 {
                     vm.CancelCurrentMode();
-                    // Return focus to the window so subsequent keys work
                     Focus();
                     e.Handled = true;
                 }
@@ -107,6 +127,18 @@ public partial class MainWindow : Window
                 ShowHelpDialog();
                 e.Handled = true;
                 break;
+        }
+    }
+
+    private async void HandleNavigateAsync(MainWindowViewModel vm, int direction)
+    {
+        try
+        {
+            await vm.NavigateImage(direction);
+        }
+        catch (Exception ex)
+        {
+            vm.StatusText = $"Error navigating: {ex.Message}";
         }
     }
 
@@ -138,7 +170,7 @@ public partial class MainWindow : Window
             ($"{mod}+Z", "Undo"),
             ($"{mod}+L", "Rotate Left"),
             ($"{mod}+R", "Rotate Right"),
-            ($"{mod}+C", "Crop Mode"),
+            ($"{mod}+Shift+C", "Crop Mode"),
             ($"{mod}+Shift+A", "Auto Color"),
             ("Left / Right", "Navigate Images"),
             ("Enter", "Apply Crop"),
@@ -253,15 +285,23 @@ public partial class MainWindow : Window
             Width = 350,
             Height = 150,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            CanResize = false
+            CanResize = false,
+            Focusable = true
         };
 
         bool result = false;
-        var yesButton = new Button { Content = "Yes", Width = 80 };
-        var noButton = new Button { Content = "No", Width = 80 };
+        var yesButton = new Button { Content = "_Yes", Width = 80 };
+        var noButton = new Button { Content = "_No", Width = 80 };
 
         yesButton.Click += (_, _) => { result = true; dialog.Close(); };
         noButton.Click += (_, _) => { result = false; dialog.Close(); };
+
+        dialog.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Y) { result = true; dialog.Close(); e.Handled = true; }
+            else if (e.Key == Key.N || e.Key == Key.Escape) { result = false; dialog.Close(); e.Handled = true; }
+            else if (e.Key == Key.Return) { result = true; dialog.Close(); e.Handled = true; }
+        };
 
         dialog.Content = new StackPanel
         {

@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>PictureEditor</string>
+    <string>Cedar Image Editor</string>
     <key>CFBundleDisplayName</key>
-    <string>Picture Editor</string>
+    <string>Cedar Image Editor</string>
     <key>CFBundleIdentifier</key>
     <string>com.pictureeditor.app</string>
     <key>CFBundleVersion</key>

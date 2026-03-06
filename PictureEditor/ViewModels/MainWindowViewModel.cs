@@ -1,25 +1,40 @@
+using Avalonia;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using PictureEditor.Services;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace PictureEditor.ViewModels;
 
-public partial class MainWindowViewModel : ViewModelBase
+public partial class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private readonly ImageEditorService _editor = new();
     private string? _currentFilePath;
+    private string? _currentDirectory;
     private List<string> _directoryImages = new();
     private int _currentImageIndex = -1;
     private bool _hasUnsavedChanges;
     private bool _suppressPreviewUpdate;
+    private CancellationTokenSource? _previewDebounceCts;
+    private int _adaptiveDebounceMs = 30;
+    private readonly Stopwatch _renderStopwatch = new();
+
+    // Double-buffered WriteableBitmaps — we alternate between two so Avalonia's
+    // binding system always sees a new reference and triggers a visual update.
+    private WriteableBitmap?[] _bitmapPool = new WriteableBitmap?[2];
+    private int _bitmapPoolIndex;
+    private int _bitmapPoolWidth;
+    private int _bitmapPoolHeight;
 
     [ObservableProperty] private Bitmap? _displayImage;
-    [ObservableProperty] private string _title = "Picture Editor";
+    [ObservableProperty] private string _title = "Cedar Image Editor";
     [ObservableProperty] private string _statusText = "Open a file or directory to begin";
     [ObservableProperty] private bool _hasImage;
     [ObservableProperty] private bool _canUndo;
@@ -30,6 +45,9 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private string _imageDimensions = "";
     [ObservableProperty] private int _imagePixelWidthValue;
     [ObservableProperty] private int _imagePixelHeightValue;
+
+    // Tracks whether a preview render is in progress (for adaptive interpolation)
+    [ObservableProperty] private bool _isPreviewActive;
 
     // Adjustment slider values
     [ObservableProperty] private double _brightnessValue = 1.0;
@@ -51,14 +69,62 @@ public partial class MainWindowViewModel : ViewModelBase
 
     // --- Real-time preview change handlers ---
 
-    partial void OnBrightnessValueChanged(double value) => UpdateAdjustmentPreview();
-    partial void OnContrastValueChanged(double value) => UpdateAdjustmentPreview();
-    partial void OnSaturationValueChanged(double value) => UpdateAdjustmentPreview();
-    partial void OnHueValueChanged(double value) => UpdateAdjustmentPreview();
-    partial void OnGammaValueChanged(double value) => UpdateAdjustmentPreview();
-    partial void OnResizePercentageChanged(int value) => UpdateResizePreview();
+    partial void OnBrightnessValueChanged(double value) => ScheduleAdjustmentPreview();
+    partial void OnContrastValueChanged(double value) => ScheduleAdjustmentPreview();
+    partial void OnSaturationValueChanged(double value) => ScheduleAdjustmentPreview();
+    partial void OnHueValueChanged(double value) => ScheduleAdjustmentPreview();
+    partial void OnGammaValueChanged(double value) => ScheduleAdjustmentPreview();
+    partial void OnResizePercentageChanged(int value) => ScheduleResizePreview();
 
-    private void UpdateAdjustmentPreview()
+    private void ScheduleAdjustmentPreview()
+    {
+        if (_suppressPreviewUpdate || !IsAdjustMode || !_editor.HasPreviewBase) return;
+        ScheduleDebouncedPreview(UpdateAdjustmentPreviewCore);
+    }
+
+    private void ScheduleResizePreview()
+    {
+        if (_suppressPreviewUpdate || !IsResizeMode || !_editor.HasPreviewBase) return;
+        if (ResizePercentage <= 0 || ResizePercentage == 100) return;
+        ScheduleDebouncedPreview(UpdateResizePreviewCore);
+    }
+
+    private async void ScheduleDebouncedPreview(Action action)
+    {
+        _previewDebounceCts?.Cancel();
+        _previewDebounceCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _previewDebounceCts = cts;
+        try
+        {
+            await Task.Delay(_adaptiveDebounceMs, cts.Token);
+            if (!cts.Token.IsCancellationRequested)
+            {
+                IsPreviewActive = true;
+                _renderStopwatch.Restart();
+                action();
+                _renderStopwatch.Stop();
+
+                // Adaptive debounce: if the last render took long, increase debounce
+                long elapsed = _renderStopwatch.ElapsedMilliseconds;
+                _adaptiveDebounceMs = elapsed switch
+                {
+                    > 200 => 150,
+                    > 100 => 80,
+                    > 50 => 50,
+                    _ => 30
+                };
+
+                IsPreviewActive = false;
+            }
+        }
+        catch (TaskCanceledException)
+        {
+            // Expected when a newer update supersedes this one
+        }
+    }
+
+    private void UpdateAdjustmentPreviewCore()
     {
         if (_suppressPreviewUpdate || !IsAdjustMode || !_editor.HasPreviewBase) return;
         _editor.RestoreFromPreviewBase();
@@ -68,7 +134,7 @@ public partial class MainWindowViewModel : ViewModelBase
         RefreshDisplay();
     }
 
-    private void UpdateResizePreview()
+    private void UpdateResizePreviewCore()
     {
         if (_suppressPreviewUpdate || !IsResizeMode || !_editor.HasPreviewBase) return;
         if (ResizePercentage <= 0 || ResizePercentage == 100) return;
@@ -160,14 +226,18 @@ public partial class MainWindowViewModel : ViewModelBase
             ResetAdjustments();
             ResizePercentage = 100;
             _suppressPreviewUpdate = false;
+
+            // Invalidate reusable bitmap since we loaded a new image
+            InvalidateBitmapPool();
+
             RefreshDisplay();
             ReinitializeActiveMode();
 
             var dir = Path.GetDirectoryName(filePath)!;
-            _directoryImages = ImageEditorService.GetImagesInDirectory(dir);
+            RefreshDirectoryListing(dir);
             _currentImageIndex = _directoryImages.IndexOf(filePath);
 
-            Title = $"Picture Editor - {Path.GetFileName(filePath)}";
+            Title = $"Cedar Image Editor - {Path.GetFileName(filePath)}";
             StatusText = $"{Path.GetFileName(filePath)} | {_editor.ImageWidth}x{_editor.ImageHeight}";
         }
         catch (Exception ex)
@@ -196,6 +266,7 @@ public partial class MainWindowViewModel : ViewModelBase
         CommitPendingPreview();
         _editor.RotateCounterClockwise();
         MarkChanged();
+        InvalidateBitmapPool(); // dimensions swap on rotate
         RefreshDisplay();
         ReinitializeActiveMode();
     }
@@ -206,6 +277,7 @@ public partial class MainWindowViewModel : ViewModelBase
         CommitPendingPreview();
         _editor.RotateClockwise();
         MarkChanged();
+        InvalidateBitmapPool(); // dimensions swap on rotate
         RefreshDisplay();
         ReinitializeActiveMode();
     }
@@ -231,6 +303,7 @@ public partial class MainWindowViewModel : ViewModelBase
             ResetAdjustments();
             ResizePercentage = 100;
             _suppressPreviewUpdate = false;
+            InvalidateBitmapPool();
             RefreshDisplay();
             ReinitializeActiveMode();
             return;
@@ -239,6 +312,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (_editor.Undo())
         {
             MarkChanged();
+            InvalidateBitmapPool();
             RefreshDisplay();
             ReinitializeActiveMode();
         }
@@ -251,7 +325,6 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         if (IsCropMode)
         {
-            // Turning off: apply crop if selection differs from full image
             ApplyCropIfNeeded();
             IsCropMode = false;
         }
@@ -279,6 +352,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             _editor.Crop(CropX, CropY, CropWidth, CropHeight);
             MarkChanged();
+            InvalidateBitmapPool();
             RefreshDisplay();
         }
     }
@@ -287,7 +361,6 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         if (!_editor.HasImage || !IsCropMode) return;
         ApplyCropIfNeeded();
-        // Re-initialize crop for the new image dimensions
         CropX = 0;
         CropY = 0;
         CropWidth = _editor.ImageWidth;
@@ -310,11 +383,13 @@ public partial class MainWindowViewModel : ViewModelBase
             _suppressPreviewUpdate = true;
             ResizePercentage = 100;
             _suppressPreviewUpdate = false;
+            InvalidateBitmapPool();
             RefreshDisplay();
         }
         IsCropMode = false;
         IsResizeMode = false;
         IsAdjustMode = false;
+        IsPreviewActive = false;
     }
 
     // --- Resize mode ---
@@ -326,6 +401,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             CommitPendingPreview();
             IsResizeMode = false;
+            IsPreviewActive = false;
         }
         else
         {
@@ -348,6 +424,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             CommitPendingPreview();
             IsAdjustMode = false;
+            IsPreviewActive = false;
         }
         else
         {
@@ -368,7 +445,6 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         if (_currentFilePath == null || !_editor.HasImage) return;
 
-        // Commit pending preview changes before saving
         bool wasAdjustMode = IsAdjustMode;
         bool wasResizeMode = IsResizeMode;
         CommitPendingPreview();
@@ -415,7 +491,6 @@ public partial class MainWindowViewModel : ViewModelBase
         var filePath = SaveFileDialog != null ? await SaveFileDialog(defaultName) : null;
         if (filePath == null)
         {
-            // User cancelled - re-enter preview base if needed
             ReEnterPreviewMode(wasAdjustMode, wasResizeMode);
             return;
         }
@@ -427,10 +502,10 @@ public partial class MainWindowViewModel : ViewModelBase
             _hasUnsavedChanges = false;
 
             var dir = Path.GetDirectoryName(filePath)!;
-            _directoryImages = ImageEditorService.GetImagesInDirectory(dir);
+            RefreshDirectoryListing(dir, force: true);
             _currentImageIndex = _directoryImages.IndexOf(filePath);
 
-            Title = $"Picture Editor - {Path.GetFileName(filePath)}";
+            Title = $"Cedar Image Editor - {Path.GetFileName(filePath)}";
             StatusText = $"Saved: {Path.GetFileName(filePath)}";
         }
         catch (Exception ex)
@@ -478,21 +553,55 @@ public partial class MainWindowViewModel : ViewModelBase
             CommitPendingPreview();
             IsResizeMode = false;
         }
+        IsPreviewActive = false;
+    }
+
+    private void InvalidateBitmapPool()
+    {
+        // Force new WriteableBitmaps on next RefreshDisplay
+        _bitmapPoolWidth = 0;
+        _bitmapPoolHeight = 0;
     }
 
     private void RefreshDisplay()
     {
         if (!_editor.HasImage) return;
-        var bytes = _editor.GetCurrentImageBytes();
-        using var ms = new MemoryStream(bytes);
-        DisplayImage?.Dispose();
-        DisplayImage = new Bitmap(ms);
+
+        int w = _editor.ImageWidth;
+        int h = _editor.ImageHeight;
+
+        // Reallocate both pool bitmaps if dimensions changed
+        if (_bitmapPoolWidth != w || _bitmapPoolHeight != h)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                _bitmapPool[i]?.Dispose();
+                _bitmapPool[i] = new WriteableBitmap(new PixelSize(w, h), new Vector(96, 96),
+                    Avalonia.Platform.PixelFormat.Bgra8888, AlphaFormat.Unpremul);
+            }
+            _bitmapPoolWidth = w;
+            _bitmapPoolHeight = h;
+        }
+
+        // Pick the buffer that is NOT currently displayed
+        _bitmapPoolIndex = (_bitmapPoolIndex + 1) % 2;
+        var wb = _bitmapPool[_bitmapPoolIndex]!;
+
+        // Write pixels directly from ImageSharp into the locked framebuffer
+        using (var fb = wb.Lock())
+        {
+            _editor.CopyPixelsToBgraDirect(fb.Address, fb.RowBytes);
+        }
+
+        // Always a different reference from what's currently bound, so Avalonia re-renders
+        DisplayImage = wb;
+
         HasImage = _editor.HasImage;
         CanUndo = _editor.CanUndo || _editor.HasPreviewBase;
-        ImagePixelWidthValue = _editor.ImageWidth;
-        ImagePixelHeightValue = _editor.ImageHeight;
-        ImageDimensions = $"{_editor.ImageWidth} x {_editor.ImageHeight}";
-        StatusText = $"{Path.GetFileName(_currentFilePath)} | {_editor.ImageWidth}x{_editor.ImageHeight}";
+        ImagePixelWidthValue = w;
+        ImagePixelHeightValue = h;
+        ImageDimensions = $"{w} x {h}";
+        StatusText = $"{Path.GetFileName(_currentFilePath)} | {w}x{h}";
         UpdateTitle();
     }
 
@@ -507,7 +616,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         var name = _currentFilePath != null ? Path.GetFileName(_currentFilePath) : "";
         var modified = _hasUnsavedChanges ? " *" : "";
-        Title = $"Picture Editor - {name}{modified}";
+        Title = $"Cedar Image Editor - {name}{modified}";
     }
 
     private void ReinitializeActiveMode()
@@ -535,6 +644,14 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
+    private void RefreshDirectoryListing(string directory, bool force = false)
+    {
+        if (!force && string.Equals(_currentDirectory, directory, StringComparison.OrdinalIgnoreCase))
+            return;
+        _currentDirectory = directory;
+        _directoryImages = ImageEditorService.GetImagesInDirectory(directory);
+    }
+
     private void ResetAdjustments()
     {
         BrightnessValue = 1.0;
@@ -542,5 +659,14 @@ public partial class MainWindowViewModel : ViewModelBase
         SaturationValue = 1.0;
         HueValue = 0;
         GammaValue = 1.0;
+    }
+
+    public void Dispose()
+    {
+        _previewDebounceCts?.Cancel();
+        _previewDebounceCts?.Dispose();
+        _bitmapPool[0]?.Dispose();
+        _bitmapPool[1]?.Dispose();
+        _editor.Dispose();
     }
 }
