@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Cedar Image Editor",
+      "type": "dotnet",
+      "request": "launch",
+      "projectPath": "${workspaceFolder}/PictureEditor/PictureEditor.csproj"
+    },
+    {
+      "name": "Cedar Image Editor (coreclr)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/PictureEditor/bin/Debug/net8.0/PictureEditor.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/PictureEditor",
+      "console": "internalConsole",
+      "stopAtEntry": false
+    }
+  ]
+}

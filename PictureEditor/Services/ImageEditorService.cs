@@ -17,6 +17,16 @@ using System.Threading.Tasks;
 
 namespace PictureEditor.Services;
 
+public enum ImageSortOrder
+{
+    NameAsc,
+    NameDesc,
+    DateModifiedAsc,
+    DateModifiedDesc,
+    SizeAsc,
+    SizeDesc,
+}
+
 public class ImageEditorService : IDisposable
 {
     private Image<Rgba32>? _currentImage;
@@ -355,6 +365,12 @@ public class ImageEditorService : IDisposable
         return (byte)Math.Clamp((int)(v * 255f + 0.5f), 0, 255);
     }
 
+    public void RotateNoUndo(float degrees)
+    {
+        if (_currentImage == null || degrees == 0f) return;
+        _currentImage.Mutate(x => x.Rotate(degrees));
+    }
+
     public void ResizeNoUndo(double percentage)
     {
         if (_currentImage == null || percentage <= 0) return;
@@ -506,13 +522,24 @@ public class ImageEditorService : IDisposable
         }
     }
 
-    public static List<string> GetImagesInDirectory(string directoryPath)
+    public static List<string> GetImagesInDirectory(string directoryPath,
+        ImageSortOrder sort = ImageSortOrder.NameAsc)
     {
         if (!Directory.Exists(directoryPath)) return new List<string>();
-        return Directory.EnumerateFiles(directoryPath)
-            .Where(f => SupportedExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
-            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var files = Directory.EnumerateFiles(directoryPath)
+            .Where(f => !Path.GetFileName(f).StartsWith("._") &&
+                        SupportedExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()));
+
+        return sort switch
+        {
+            ImageSortOrder.NameAsc => files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList(),
+            ImageSortOrder.NameDesc => files.OrderByDescending(f => f, StringComparer.OrdinalIgnoreCase).ToList(),
+            ImageSortOrder.DateModifiedAsc => files.OrderBy(f => File.GetLastWriteTimeUtc(f)).ToList(),
+            ImageSortOrder.DateModifiedDesc => files.OrderByDescending(f => File.GetLastWriteTimeUtc(f)).ToList(),
+            ImageSortOrder.SizeAsc => files.OrderBy(f => new FileInfo(f).Length).ToList(),
+            ImageSortOrder.SizeDesc => files.OrderByDescending(f => new FileInfo(f).Length).ToList(),
+            _ => files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList(),
+        };
     }
 
     public static bool IsSupportedFile(string filePath)

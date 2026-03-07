@@ -6,4 +6,10 @@
     <Application.Styles>
         <FluentTheme />
     </Application.Styles>
+
+    <NativeMenu.Menu>
+        <NativeMenu>
+            <NativeMenuItem Header="About Cedar Image Editor" Click="OnAboutClick"/>
+        </NativeMenu>
+    </NativeMenu.Menu>
 </Application>

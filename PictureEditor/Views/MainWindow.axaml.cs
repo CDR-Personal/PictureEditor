@@ -36,6 +36,38 @@ public partial class MainWindow : Window
 
         // Use tunnel routing so we get key events before child controls
         AddHandler(KeyDownEvent, OnPreviewKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+
+        // Automatically show the folder picker when the window first opens
+        Opened += OnWindowOpened;
+    }
+
+    private async void OnWindowOpened(object? sender, EventArgs e)
+    {
+        Opened -= OnWindowOpened; // only once
+        if (DataContext is not MainWindowViewModel vm) return;
+
+        // Yield to the event loop so macOS Apple Events (from "Open With")
+        // have a chance to be delivered before we decide to show the folder dialog
+        if (vm.StartupFilePath == null)
+            await Task.Delay(150);
+
+        if (vm.StartupFilePath != null)
+        {
+            var path = vm.StartupFilePath;
+            vm.StartupFilePath = null;
+            if (System.IO.File.Exists(path))
+                await vm.LoadFile(path);
+            else if (System.IO.Directory.Exists(path))
+            {
+                var images = ImageEditorService.GetImagesInDirectory(path);
+                if (images.Count > 0)
+                    await vm.LoadFile(images[0]);
+            }
+        }
+        else
+        {
+            await vm.OpenFolderCommand.ExecuteAsync(null);
+        }
     }
 
     protected override void OnClosing(WindowClosingEventArgs e)
@@ -66,6 +98,8 @@ public partial class MainWindow : Window
             vm.OpenFolderDialog = ShowOpenFolderDialog;
             vm.SaveFileDialog = ShowSaveFileDialog;
             vm.ConfirmDialog = ShowConfirmDialog;
+            vm.TextInputDialog = ShowTextInputDialog;
+            vm.SortDialog = ShowSortDialog;
 
             // Subscribe to IsPreviewActive changes for adaptive interpolation quality
             vm.PropertyChanged += OnViewModelPropertyChanged;
@@ -108,6 +142,20 @@ public partial class MainWindow : Window
                     e.Handled = true;
                 }
                 break;
+            case Key.Up:
+                if (!inputHasFocus && vm.IsRotateMode)
+                {
+                    vm.NudgeRotation(1);
+                    e.Handled = true;
+                }
+                break;
+            case Key.Down:
+                if (!inputHasFocus && vm.IsRotateMode)
+                {
+                    vm.NudgeRotation(-1);
+                    e.Handled = true;
+                }
+                break;
             case Key.Return:
                 if (vm.IsCropMode && !inputHasFocus)
                 {
@@ -115,11 +163,26 @@ public partial class MainWindow : Window
                     e.Handled = true;
                 }
                 break;
+            case Key.Delete:
+            case Key.Back:
+                if (!inputHasFocus && vm.HasImage)
+                {
+                    HandleDeleteAsync(vm);
+                    e.Handled = true;
+                }
+                break;
             case Key.Escape:
-                if (vm.IsCropMode || vm.IsResizeMode || vm.IsAdjustMode)
+                if (vm.IsCropMode || vm.IsResizeMode || vm.IsAdjustMode || vm.IsRotateMode)
                 {
                     vm.CancelCurrentMode();
                     Focus();
+                    e.Handled = true;
+                }
+                break;
+            case Key.F2:
+                if (vm.HasImage)
+                {
+                    HandleRenameAsync(vm);
                     e.Handled = true;
                 }
                 break;
@@ -130,6 +193,18 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void HandleRenameAsync(MainWindowViewModel vm)
+    {
+        try { await vm.RenameFileCommand.ExecuteAsync(null); }
+        catch (Exception ex) { vm.Title = $"Cedar Image Editor — Error: {ex.Message}"; }
+    }
+
+    private async void HandleDeleteAsync(MainWindowViewModel vm)
+    {
+        try { await vm.DeleteFileCommand.ExecuteAsync(null); }
+        catch (Exception ex) { vm.Title = $"Cedar Image Editor — Error: {ex.Message}"; }
+    }
+
     private async void HandleNavigateAsync(MainWindowViewModel vm, int direction)
     {
         try
@@ -138,7 +213,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            vm.StatusText = $"Error navigating: {ex.Message}";
+            vm.Title = $"Cedar Image Editor — Error navigating: {ex.Message}";
         }
     }
 
@@ -171,7 +246,10 @@ public partial class MainWindow : Window
             ($"{mod}+L", "Rotate Left"),
             ($"{mod}+R", "Rotate Right"),
             ($"{mod}+Shift+C", "Crop Mode"),
-            ($"{mod}+Shift+A", "Auto Color"),
+            ($"{mod}+A", "Auto Color"),
+            ("Up / Down", "Fine Rotate (in rotate mode)"),
+            ("F2", "Rename Current File"),
+            ("Delete", "Delete Current File"),
             ("Left / Right", "Navigate Images"),
             ("Enter", "Apply Crop"),
             ("Escape", "Cancel Current Mode"),
@@ -316,6 +394,151 @@ public partial class MainWindow : Window
                     HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
                     Spacing = 10,
                     Children = { yesButton, noButton }
+                }
+            }
+        };
+
+        await dialog.ShowDialog(this);
+        return result;
+    }
+
+    private async Task<string?> ShowTextInputDialog(string title, string label, string defaultValue)
+    {
+        var dialog = new Window
+        {
+            Title = title,
+            Width = 420,
+            Height = 170,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Focusable = true
+        };
+
+        string? result = null;
+        var textBox = new TextBox
+        {
+            Text = defaultValue,
+            SelectionStart = 0,
+            SelectionEnd = System.IO.Path.GetFileNameWithoutExtension(defaultValue).Length
+        };
+
+        var okButton = new Button { Content = "_OK", Width = 80 };
+        var cancelButton = new Button { Content = "_Cancel", Width = 80 };
+
+        void Submit() { result = textBox.Text; dialog.Close(); }
+
+        okButton.Click += (_, _) => Submit();
+        cancelButton.Click += (_, _) => dialog.Close();
+        textBox.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Return) { Submit(); e.Handled = true; }
+            else if (e.Key == Key.Escape) { dialog.Close(); e.Handled = true; }
+        };
+
+        dialog.Content = new StackPanel
+        {
+            Margin = new Avalonia.Thickness(20),
+            Spacing = 12,
+            Children =
+            {
+                new TextBlock { Text = label },
+                textBox,
+                new StackPanel
+                {
+                    Orientation = Avalonia.Layout.Orientation.Horizontal,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                    Spacing = 10,
+                    Children = { okButton, cancelButton }
+                }
+            }
+        };
+
+        dialog.Opened += (_, _) => textBox.Focus();
+
+        await dialog.ShowDialog(this);
+        return result;
+    }
+
+    private async Task<ImageSortOrder?> ShowSortDialog(ImageSortOrder current)
+    {
+        var dialog = new Window
+        {
+            Title = "Sort Images",
+            Width = 300,
+            Height = 380,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Focusable = true
+        };
+
+        ImageSortOrder? result = null;
+        var options = new (string Label, ImageSortOrder Value)[]
+        {
+            ("Name (A \u2192 Z)", ImageSortOrder.NameAsc),
+            ("Name (Z \u2192 A)", ImageSortOrder.NameDesc),
+            ("Date Modified (Oldest)", ImageSortOrder.DateModifiedAsc),
+            ("Date Modified (Newest)", ImageSortOrder.DateModifiedDesc),
+            ("File Size (Smallest)", ImageSortOrder.SizeAsc),
+            ("File Size (Largest)", ImageSortOrder.SizeDesc),
+        };
+
+        var radioGroup = new StackPanel { Spacing = 6 };
+        RadioButton? firstButton = null;
+        foreach (var (label, value) in options)
+        {
+            var rb = new RadioButton
+            {
+                Content = label,
+                GroupName = "Sort",
+                IsChecked = value == current,
+                Tag = value
+            };
+            if (firstButton == null) firstButton = rb;
+            radioGroup.Children.Add(rb);
+        }
+
+        var okButton = new Button { Content = "_OK", Width = 80 };
+        var cancelButton = new Button { Content = "_Cancel", Width = 80 };
+
+        okButton.Click += (_, _) =>
+        {
+            foreach (var child in radioGroup.Children)
+            {
+                if (child is RadioButton rb && rb.IsChecked == true)
+                {
+                    result = (ImageSortOrder)rb.Tag!;
+                    break;
+                }
+            }
+            dialog.Close();
+        };
+        cancelButton.Click += (_, _) => dialog.Close();
+
+        dialog.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape) { dialog.Close(); e.Handled = true; }
+            else if (e.Key == Key.Return) { okButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent)); e.Handled = true; }
+        };
+
+        dialog.Content = new StackPanel
+        {
+            Margin = new Avalonia.Thickness(20),
+            Spacing = 16,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = "Sort images by:",
+                    FontSize = 16,
+                    FontWeight = Avalonia.Media.FontWeight.Bold
+                },
+                radioGroup,
+                new StackPanel
+                {
+                    Orientation = Avalonia.Layout.Orientation.Horizontal,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                    Spacing = 10,
+                    Children = { okButton, cancelButton }
                 }
             }
         };

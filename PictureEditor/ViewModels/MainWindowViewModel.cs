@@ -21,6 +21,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private List<string> _directoryImages = new();
     private int _currentImageIndex = -1;
     private bool _hasUnsavedChanges;
+    private ImageSortOrder _sortOrder = ImageSortOrder.NameAsc;
+    private string? _titleStatus;
     private bool _suppressPreviewUpdate;
     private CancellationTokenSource? _previewDebounceCts;
     private int _adaptiveDebounceMs = 30;
@@ -41,7 +43,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _isCropMode;
     [ObservableProperty] private bool _isResizeMode;
     [ObservableProperty] private bool _isAdjustMode;
+    [ObservableProperty] private bool _isRotateMode;
     [ObservableProperty] private int _resizePercentage = 100;
+    [ObservableProperty] private double _rotateDegrees;
     [ObservableProperty] private string _imageDimensions = "";
     [ObservableProperty] private int _imagePixelWidthValue;
     [ObservableProperty] private int _imagePixelHeightValue;
@@ -62,10 +66,14 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _cropWidth;
     [ObservableProperty] private int _cropHeight;
 
+    public string? StartupFilePath { get; set; }
+
     public Func<Task<string?>>? OpenFileDialog { get; set; }
     public Func<Task<string?>>? OpenFolderDialog { get; set; }
     public Func<string, Task<string?>>? SaveFileDialog { get; set; }
     public Func<string, string, Task<bool>>? ConfirmDialog { get; set; }
+    public Func<string, string, string, Task<string?>>? TextInputDialog { get; set; }
+    public Func<ImageSortOrder, Task<ImageSortOrder?>>? SortDialog { get; set; }
 
     // --- Real-time preview change handlers ---
 
@@ -75,6 +83,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     partial void OnHueValueChanged(double value) => ScheduleAdjustmentPreview();
     partial void OnGammaValueChanged(double value) => ScheduleAdjustmentPreview();
     partial void OnResizePercentageChanged(int value) => ScheduleResizePreview();
+    partial void OnRotateDegreesChanged(double value) => ScheduleRotatePreview();
 
     private void ScheduleAdjustmentPreview()
     {
@@ -143,6 +152,22 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         RefreshDisplay();
     }
 
+    private void ScheduleRotatePreview()
+    {
+        if (_suppressPreviewUpdate || !IsRotateMode || !_editor.HasPreviewBase) return;
+        ScheduleDebouncedPreview(UpdateRotatePreviewCore);
+    }
+
+    private void UpdateRotatePreviewCore()
+    {
+        if (_suppressPreviewUpdate || !IsRotateMode || !_editor.HasPreviewBase) return;
+        _editor.RestoreFromPreviewBase();
+        if (Math.Abs(RotateDegrees) > 0.01)
+            _editor.RotateNoUndo((float)RotateDegrees);
+        InvalidateBitmapPool();
+        RefreshDisplay();
+    }
+
     private bool HasAdjustmentChanges()
     {
         return Math.Abs(BrightnessValue - 1.0) > 0.01
@@ -165,6 +190,12 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             _editor.CommitPreview();
             MarkChanged();
+        }
+        else if (IsRotateMode && Math.Abs(RotateDegrees) > 0.01)
+        {
+            _editor.CommitPreview();
+            MarkChanged();
+            InvalidateBitmapPool();
         }
         else
         {
@@ -191,7 +222,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         _directoryImages = ImageEditorService.GetImagesInDirectory(folderPath);
         if (_directoryImages.Count == 0)
         {
-            StatusText = "No supported images found in directory";
+            SetTitleStatus("No supported images found in directory");
             return;
         }
         _currentImageIndex = 0;
@@ -202,7 +233,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (!ImageEditorService.IsSupportedFile(filePath))
         {
-            StatusText = "Unsupported file format";
+            SetTitleStatus("Unsupported file format");
             return;
         }
 
@@ -230,19 +261,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             // Invalidate reusable bitmap since we loaded a new image
             InvalidateBitmapPool();
 
-            RefreshDisplay();
-            ReinitializeActiveMode();
+            _titleStatus = null;
 
             var dir = Path.GetDirectoryName(filePath)!;
             RefreshDirectoryListing(dir);
             _currentImageIndex = _directoryImages.IndexOf(filePath);
 
-            Title = $"Cedar Image Editor - {Path.GetFileName(filePath)}";
-            StatusText = $"{Path.GetFileName(filePath)} | {_editor.ImageWidth}x{_editor.ImageHeight}";
+            RefreshDisplay();
+            ReinitializeActiveMode();
         }
         catch (Exception ex)
         {
-            StatusText = $"Error loading image: {ex.Message}";
+            SetTitleStatus($"Error loading: {ex.Message}");
         }
     }
 
@@ -386,9 +416,19 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             InvalidateBitmapPool();
             RefreshDisplay();
         }
+        if (IsRotateMode && _editor.HasPreviewBase)
+        {
+            _editor.DiscardPreviewBase();
+            _suppressPreviewUpdate = true;
+            RotateDegrees = 0;
+            _suppressPreviewUpdate = false;
+            InvalidateBitmapPool();
+            RefreshDisplay();
+        }
         IsCropMode = false;
         IsResizeMode = false;
         IsAdjustMode = false;
+        IsRotateMode = false;
         IsPreviewActive = false;
     }
 
@@ -438,6 +478,35 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // --- Rotate by degree mode ---
+
+    [RelayCommand]
+    private void ToggleRotateMode()
+    {
+        if (IsRotateMode)
+        {
+            CommitPendingPreview();
+            IsRotateMode = false;
+            IsPreviewActive = false;
+        }
+        else
+        {
+            CommitPendingPreview();
+            ExitOtherModes();
+            IsRotateMode = true;
+            _suppressPreviewUpdate = true;
+            RotateDegrees = 0;
+            _suppressPreviewUpdate = false;
+            _editor.SavePreviewBase();
+        }
+    }
+
+    public void NudgeRotation(double deltaDegrees)
+    {
+        if (!IsRotateMode) return;
+        RotateDegrees += deltaDegrees;
+    }
+
     // --- Save ---
 
     [RelayCommand]
@@ -447,35 +516,21 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         bool wasAdjustMode = IsAdjustMode;
         bool wasResizeMode = IsResizeMode;
+        bool wasRotateMode = IsRotateMode;
         CommitPendingPreview();
 
         try
         {
             _editor.SaveImage(_currentFilePath);
             _hasUnsavedChanges = false;
-            StatusText = $"Saved: {Path.GetFileName(_currentFilePath)}";
-            UpdateTitle();
+            SetTitleStatus("Saved");
         }
         catch (Exception ex)
         {
-            StatusText = $"Error saving: {ex.Message}";
+            SetTitleStatus($"Error saving: {ex.Message}");
         }
 
-        // Re-enter preview base if still in a preview mode
-        if (wasAdjustMode && IsAdjustMode)
-        {
-            _suppressPreviewUpdate = true;
-            ResetAdjustments();
-            _suppressPreviewUpdate = false;
-            _editor.SavePreviewBase();
-        }
-        if (wasResizeMode && IsResizeMode)
-        {
-            _suppressPreviewUpdate = true;
-            ResizePercentage = 100;
-            _suppressPreviewUpdate = false;
-            _editor.SavePreviewBase();
-        }
+        ReEnterPreviewMode(wasAdjustMode, wasResizeMode, wasRotateMode);
     }
 
     [RelayCommand]
@@ -485,13 +540,14 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         bool wasAdjustMode = IsAdjustMode;
         bool wasResizeMode = IsResizeMode;
+        bool wasRotateMode = IsRotateMode;
         CommitPendingPreview();
 
         var defaultName = _currentFilePath != null ? Path.GetFileName(_currentFilePath) : "image.png";
         var filePath = SaveFileDialog != null ? await SaveFileDialog(defaultName) : null;
         if (filePath == null)
         {
-            ReEnterPreviewMode(wasAdjustMode, wasResizeMode);
+            ReEnterPreviewMode(wasAdjustMode, wasResizeMode, wasRotateMode);
             return;
         }
 
@@ -505,18 +561,17 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             RefreshDirectoryListing(dir, force: true);
             _currentImageIndex = _directoryImages.IndexOf(filePath);
 
-            Title = $"Cedar Image Editor - {Path.GetFileName(filePath)}";
-            StatusText = $"Saved: {Path.GetFileName(filePath)}";
+            SetTitleStatus("Saved");
         }
         catch (Exception ex)
         {
-            StatusText = $"Error saving: {ex.Message}";
+            SetTitleStatus($"Error saving: {ex.Message}");
         }
 
-        ReEnterPreviewMode(wasAdjustMode, wasResizeMode);
+        ReEnterPreviewMode(wasAdjustMode, wasResizeMode, wasRotateMode);
     }
 
-    private void ReEnterPreviewMode(bool wasAdjustMode, bool wasResizeMode)
+    private void ReEnterPreviewMode(bool wasAdjustMode, bool wasResizeMode, bool wasRotateMode = false)
     {
         if (wasAdjustMode && IsAdjustMode)
         {
@@ -531,6 +586,107 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             ResizePercentage = 100;
             _suppressPreviewUpdate = false;
             _editor.SavePreviewBase();
+        }
+        if (wasRotateMode && IsRotateMode)
+        {
+            _suppressPreviewUpdate = true;
+            RotateDegrees = 0;
+            _suppressPreviewUpdate = false;
+            _editor.SavePreviewBase();
+        }
+    }
+
+    // --- Delete ---
+
+    [RelayCommand]
+    private async Task DeleteFile()
+    {
+        if (_currentFilePath == null || !_editor.HasImage) return;
+
+        var fileName = Path.GetFileName(_currentFilePath);
+        var confirmed = ConfirmDialog != null
+            ? await ConfirmDialog("Delete File", $"Delete \"{fileName}\"? This cannot be undone.")
+            : false;
+        if (!confirmed) return;
+
+        var fileToDelete = _currentFilePath;
+        var oldIndex = _currentImageIndex;
+
+        // Remove from directory listing
+        if (oldIndex >= 0 && oldIndex < _directoryImages.Count)
+            _directoryImages.RemoveAt(oldIndex);
+
+        // Navigate to next image (or previous if at end)
+        if (_directoryImages.Count > 0)
+        {
+            var newIndex = oldIndex < _directoryImages.Count ? oldIndex : _directoryImages.Count - 1;
+            _currentImageIndex = newIndex;
+            await LoadFile(_directoryImages[newIndex]);
+        }
+        else
+        {
+            // No more images
+            _editor.Dispose();
+            _currentFilePath = null;
+            _currentImageIndex = -1;
+            _hasUnsavedChanges = false;
+            DisplayImage = null;
+            HasImage = false;
+            CanUndo = false;
+            ImageDimensions = "";
+            StatusText = "No more images in directory";
+            InvalidateBitmapPool();
+            UpdateTitle();
+        }
+
+        // Delete the file after navigating away
+        try
+        {
+            File.Delete(fileToDelete);
+            SetTitleStatus($"Deleted {fileName}");
+        }
+        catch (Exception ex)
+        {
+            SetTitleStatus($"Error deleting: {ex.Message}");
+        }
+    }
+
+    // --- Rename ---
+
+    [RelayCommand]
+    private async Task RenameFile()
+    {
+        if (_currentFilePath == null || !_editor.HasImage) return;
+
+        var oldName = Path.GetFileName(_currentFilePath);
+        var newName = TextInputDialog != null
+            ? await TextInputDialog("Rename File", "New file name:", oldName)
+            : null;
+        if (newName == null || newName == oldName) return;
+
+        var dir = Path.GetDirectoryName(_currentFilePath)!;
+        var newPath = Path.Combine(dir, newName);
+
+        if (File.Exists(newPath))
+        {
+            SetTitleStatus("A file with that name already exists");
+            return;
+        }
+
+        try
+        {
+            File.Move(_currentFilePath, newPath);
+            _currentFilePath = newPath;
+
+            // Update directory listing
+            if (_currentImageIndex >= 0 && _currentImageIndex < _directoryImages.Count)
+                _directoryImages[_currentImageIndex] = newPath;
+
+            SetTitleStatus($"Renamed to {newName}");
+        }
+        catch (Exception ex)
+        {
+            SetTitleStatus($"Error renaming: {ex.Message}");
         }
     }
 
@@ -552,6 +708,11 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             CommitPendingPreview();
             IsResizeMode = false;
+        }
+        if (IsRotateMode)
+        {
+            CommitPendingPreview();
+            IsRotateMode = false;
         }
         IsPreviewActive = false;
     }
@@ -616,7 +777,17 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         var name = _currentFilePath != null ? Path.GetFileName(_currentFilePath) : "";
         var modified = _hasUnsavedChanges ? " *" : "";
-        Title = $"Cedar Image Editor - {name}{modified}";
+        var counter = _directoryImages.Count > 0 && _currentImageIndex >= 0
+            ? $" ({_currentImageIndex + 1} of {_directoryImages.Count})"
+            : "";
+        var status = _titleStatus != null ? $" — {_titleStatus}" : "";
+        Title = $"Cedar Image Editor - {name}{modified}{counter}{status}";
+    }
+
+    private void SetTitleStatus(string message)
+    {
+        _titleStatus = message;
+        UpdateTitle();
     }
 
     private void ReinitializeActiveMode()
@@ -642,6 +813,30 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             _suppressPreviewUpdate = false;
             _editor.SavePreviewBase();
         }
+        if (IsRotateMode)
+        {
+            _suppressPreviewUpdate = true;
+            RotateDegrees = 0;
+            _suppressPreviewUpdate = false;
+            _editor.SavePreviewBase();
+        }
+    }
+
+    [RelayCommand]
+    private async Task ChangeSort()
+    {
+        if (SortDialog == null) return;
+        var result = await SortDialog(_sortOrder);
+        if (result == null || result == _sortOrder) return;
+
+        _sortOrder = result.Value;
+        if (_currentDirectory != null)
+        {
+            _directoryImages = ImageEditorService.GetImagesInDirectory(_currentDirectory, _sortOrder);
+            if (_currentFilePath != null)
+                _currentImageIndex = _directoryImages.IndexOf(_currentFilePath);
+            UpdateTitle();
+        }
     }
 
     private void RefreshDirectoryListing(string directory, bool force = false)
@@ -649,7 +844,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (!force && string.Equals(_currentDirectory, directory, StringComparison.OrdinalIgnoreCase))
             return;
         _currentDirectory = directory;
-        _directoryImages = ImageEditorService.GetImagesInDirectory(directory);
+        _directoryImages = ImageEditorService.GetImagesInDirectory(directory, _sortOrder);
     }
 
     private void ResetAdjustments()

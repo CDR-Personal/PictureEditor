@@ -34,8 +34,8 @@
         <KeyBinding Gesture="Ctrl+R" Command="{Binding RotateRightCommand}"/>
         <KeyBinding Gesture="Cmd+Shift+C" Command="{Binding ToggleCropModeCommand}"/>
         <KeyBinding Gesture="Ctrl+Shift+C" Command="{Binding ToggleCropModeCommand}"/>
-        <KeyBinding Gesture="Cmd+Shift+A" Command="{Binding AutoColorCommand}"/>
-        <KeyBinding Gesture="Ctrl+Shift+A" Command="{Binding AutoColorCommand}"/>
+        <KeyBinding Gesture="Cmd+A" Command="{Binding AutoColorCommand}"/>
+        <KeyBinding Gesture="Ctrl+A" Command="{Binding AutoColorCommand}"/>
     </Window.KeyBindings>
 
     <DockPanel>
@@ -57,31 +57,35 @@
                 <MenuItem Header="Re_size" Command="{Binding ToggleResizeModeCommand}"/>
                 <MenuItem Header="_Adjustments" Command="{Binding ToggleAdjustModeCommand}"/>
                 <Separator/>
-                <MenuItem Header="A_uto Color" Command="{Binding AutoColorCommand}" InputGesture="Cmd+Shift+A"/>
+                <MenuItem Header="A_uto Color" Command="{Binding AutoColorCommand}" InputGesture="Cmd+A"/>
             </MenuItem>
             <MenuItem Header="_Help">
                 <MenuItem Header="_Keyboard Shortcuts" InputGesture="F1" Click="OnHelpClick"/>
             </MenuItem>
         </Menu>
 
-        <!-- Toolbar -->
-        <Border DockPanel.Dock="Top" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
-                Padding="6,4">
-            <StackPanel Orientation="Horizontal" Spacing="4">
-                <Button Content="Open File" Command="{Binding OpenFileCommand}" ToolTip.Tip="Open image file (Cmd+O)"/>
-                <Button Content="Open Folder" Command="{Binding OpenFolderCommand}" ToolTip.Tip="Open folder (Cmd+Shift+O)"/>
-                <Border Width="1" Background="Gray" Margin="4,2"/>
-                <Button Content="Undo" Command="{Binding UndoCommand}" IsEnabled="{Binding CanUndo}" ToolTip.Tip="Undo (Cmd+Z)"/>
-                <Border Width="1" Background="Gray" Margin="4,2"/>
-                <Button Content="Rotate Left" Command="{Binding RotateLeftCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Rotate left (Cmd+L)"/>
-                <Button Content="Rotate Right" Command="{Binding RotateRightCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Rotate right (Cmd+R)"/>
-                <Button Content="Crop" Command="{Binding ToggleCropModeCommand}" IsEnabled="{Binding HasImage}"/>
-                <Button Content="Resize" Command="{Binding ToggleResizeModeCommand}" IsEnabled="{Binding HasImage}"/>
-                <Button Content="Adjust" Command="{Binding ToggleAdjustModeCommand}" IsEnabled="{Binding HasImage}"/>
-                <Button Content="Auto Color" Command="{Binding AutoColorCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Automatic color correction (Cmd+Shift+A)"/>
-                <Border Width="1" Background="Gray" Margin="4,2"/>
-                <Button Content="Save" Command="{Binding SaveCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Save (Cmd+S)"/>
-                <Button Content="Save As" Command="{Binding SaveAsCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Save As (Cmd+Shift+S)"/>
+        <!-- Toolbar (vertical, left side) -->
+        <Border DockPanel.Dock="Left" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                Padding="4,6" BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                BorderThickness="0,0,1,0">
+            <StackPanel Orientation="Vertical" Spacing="4">
+                <Button Content="Open File" Command="{Binding OpenFileCommand}" ToolTip.Tip="Open image file (Cmd+O)" HorizontalAlignment="Stretch"/>
+                <Button Content="Open Folder" Command="{Binding OpenFolderCommand}" ToolTip.Tip="Open folder (Cmd+Shift+O)" HorizontalAlignment="Stretch"/>
+                <Border Height="1" Background="Gray" Margin="2,4"/>
+                <Button Content="Undo" Command="{Binding UndoCommand}" IsEnabled="{Binding CanUndo}" ToolTip.Tip="Undo (Cmd+Z)" HorizontalAlignment="Stretch"/>
+                <Border Height="1" Background="Gray" Margin="2,4"/>
+                <Button Content="Rotate Left" Command="{Binding RotateLeftCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Rotate left (Cmd+L)" HorizontalAlignment="Stretch"/>
+                <Button Content="Rotate Right" Command="{Binding RotateRightCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Rotate right (Cmd+R)" HorizontalAlignment="Stretch"/>
+                <Button Content="Fine Rotate" Command="{Binding ToggleRotateModeCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Rotate by degree (Up/Down keys)" HorizontalAlignment="Stretch"/>
+                <Button Content="Crop" Command="{Binding ToggleCropModeCommand}" IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"/>
+                <Button Content="Resize" Command="{Binding ToggleResizeModeCommand}" IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"/>
+                <Button Content="Adjust" Command="{Binding ToggleAdjustModeCommand}" IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"/>
+                <Button Content="Auto Color" Command="{Binding AutoColorCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Automatic color correction (Cmd+A)" HorizontalAlignment="Stretch"/>
+                <Border Height="1" Background="Gray" Margin="2,4"/>
+                <Button Content="Save" Command="{Binding SaveCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Save (Cmd+S)" HorizontalAlignment="Stretch"/>
+                <Button Content="Save As" Command="{Binding SaveAsCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Save As (Cmd+Shift+S)" HorizontalAlignment="Stretch"/>
+                <Border Height="1" Background="Gray" Margin="2,4"/>
+                <Button Content="Sort" Command="{Binding ChangeSortCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Change image sort order" HorizontalAlignment="Stretch"/>
             </StackPanel>
         </Border>
 
@@ -169,6 +173,24 @@
                     <TextBlock Text="Changes apply in real-time. Escape to cancel." Opacity="0.5" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
                 </StackPanel>
             </ScrollViewer>
+        </Border>
+
+        <!-- Side Panel: Fine Rotate -->
+        <Border DockPanel.Dock="Right" Width="260"
+                Background="{DynamicResource SystemControlBackgroundChromeLowBrush}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                BorderThickness="1,0,0,0"
+                Padding="12"
+                IsVisible="{Binding IsRotateMode}">
+            <StackPanel Spacing="10">
+                <TextBlock Text="Fine Rotate" FontSize="18" FontWeight="Bold"/>
+
+                <TextBlock Text="{Binding RotateDegrees, StringFormat='Angle: {0:F1}°'}"/>
+                <Slider Value="{Binding RotateDegrees}" Minimum="-180" Maximum="180" TickFrequency="0.5"/>
+                <NumericUpDown Value="{Binding RotateDegrees}" Minimum="-360" Maximum="360" Increment="1" FormatString="0.0"/>
+
+                <TextBlock Text="Use Up/Down arrow keys for 1° steps. Escape to cancel." Opacity="0.5" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+            </StackPanel>
         </Border>
 
         <!-- Main Image Area -->

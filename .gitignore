@@ -5,3 +5,5 @@ obj/
 *.suo
 *.DotSettings.user
 .DS_Store
+.claude/commands/plan-exit-review.md
+/.claude/skills
