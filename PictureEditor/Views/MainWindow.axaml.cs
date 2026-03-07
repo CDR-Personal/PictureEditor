@@ -16,6 +16,9 @@ namespace PictureEditor.Views;
 public partial class MainWindow : Window
 {
     private readonly WindowSettings _settings;
+    private WindowState _preContinuousWindowState;
+    private double _preContinuousWidth;
+    private double _preContinuousHeight;
 
     public MainWindow()
     {
@@ -100,6 +103,8 @@ public partial class MainWindow : Window
             vm.ConfirmDialog = ShowConfirmDialog;
             vm.TextInputDialog = ShowTextInputDialog;
             vm.SortDialog = ShowSortDialog;
+            vm.EnterContinuousView = OnEnterContinuousView;
+            vm.ExitContinuousView = OnExitContinuousView;
 
             // Subscribe to IsPreviewActive changes for adaptive interpolation quality
             vm.PropertyChanged += OnViewModelPropertyChanged;
@@ -115,6 +120,24 @@ public partial class MainWindow : Window
                 ? BitmapInterpolationMode.LowQuality
                 : BitmapInterpolationMode.MediumQuality;
             RenderOptions.SetBitmapInterpolationMode(MainImage, quality);
+        }
+    }
+
+    private void OnEnterContinuousView()
+    {
+        _preContinuousWindowState = WindowState;
+        _preContinuousWidth = Width;
+        _preContinuousHeight = Height;
+        WindowState = WindowState.FullScreen;
+    }
+
+    private void OnExitContinuousView()
+    {
+        WindowState = _preContinuousWindowState;
+        if (_preContinuousWindowState == WindowState.Normal)
+        {
+            Width = _preContinuousWidth;
+            Height = _preContinuousHeight;
         }
     }
 
@@ -171,8 +194,21 @@ public partial class MainWindow : Window
                     e.Handled = true;
                 }
                 break;
+            case Key.Space:
+                if (!inputHasFocus && vm.HasImage)
+                {
+                    vm.HandleSpaceKey();
+                    e.Handled = true;
+                }
+                break;
             case Key.Escape:
-                if (vm.IsCropMode || vm.IsResizeMode || vm.IsAdjustMode || vm.IsRotateMode)
+                if (vm.IsContinuousMode)
+                {
+                    vm.StopContinuousMode();
+                    Focus();
+                    e.Handled = true;
+                }
+                else if (vm.IsCropMode || vm.IsResizeMode || vm.IsAdjustMode || vm.IsRotateMode)
                 {
                     vm.CancelCurrentMode();
                     Focus();
@@ -252,6 +288,7 @@ public partial class MainWindow : Window
             ("Delete", "Delete Current File"),
             ("Left / Right", "Navigate Images"),
             ("Enter", "Apply Crop"),
+            ("Space", "Start/Stop Slideshow"),
             ("Escape", "Cancel Current Mode"),
             ("F1", "Show This Help"),
         };

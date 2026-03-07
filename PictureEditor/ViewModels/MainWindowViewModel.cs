@@ -16,6 +16,7 @@ namespace PictureEditor.ViewModels;
 public partial class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private readonly ImageEditorService _editor = new();
+    private readonly AppSettings _appSettings = AppSettings.Load();
     private string? _currentFilePath;
     private string? _currentDirectory;
     private List<string> _directoryImages = new();
@@ -25,6 +26,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private string? _titleStatus;
     private bool _suppressPreviewUpdate;
     private CancellationTokenSource? _previewDebounceCts;
+    private CancellationTokenSource? _slideshowCts;
     private int _adaptiveDebounceMs = 30;
     private readonly Stopwatch _renderStopwatch = new();
 
@@ -52,6 +54,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     // Tracks whether a preview render is in progress (for adaptive interpolation)
     [ObservableProperty] private bool _isPreviewActive;
+
+    // Continuous/slideshow mode
+    [ObservableProperty] private bool _isContinuousMode;
 
     // Adjustment slider values
     [ObservableProperty] private double _brightnessValue = 1.0;
@@ -286,6 +291,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (newIndex != _currentImageIndex)
             await LoadFile(_directoryImages[newIndex]);
+
+        if (IsContinuousMode && !IsSlideshowPaused)
+            RestartSlideshowTimer();
     }
 
     // --- Edit operations ---
@@ -690,6 +698,86 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // --- Continuous/Slideshow mode ---
+
+    public Action? EnterContinuousView { get; set; }
+    public Action? ExitContinuousView { get; set; }
+
+    public bool IsSlideshowPaused { get; private set; }
+
+    public void HandleSpaceKey()
+    {
+        if (!IsContinuousMode)
+        {
+            StartContinuousMode();
+        }
+        else if (IsSlideshowPaused)
+        {
+            IsSlideshowPaused = false;
+            RestartSlideshowTimer();
+        }
+        else
+        {
+            IsSlideshowPaused = true;
+            _slideshowCts?.Cancel();
+            _slideshowCts?.Dispose();
+            _slideshowCts = null;
+        }
+    }
+
+    private void StartContinuousMode()
+    {
+        if (!HasImage || _directoryImages.Count == 0) return;
+
+        CommitPendingPreview();
+        ExitOtherModes();
+        IsContinuousMode = true;
+        IsSlideshowPaused = false;
+        EnterContinuousView?.Invoke();
+
+        _slideshowCts?.Cancel();
+        _slideshowCts?.Dispose();
+        _slideshowCts = new CancellationTokenSource();
+        _ = RunSlideshowLoop(_slideshowCts.Token);
+    }
+
+    private void RestartSlideshowTimer()
+    {
+        _slideshowCts?.Cancel();
+        _slideshowCts?.Dispose();
+        _slideshowCts = new CancellationTokenSource();
+        _ = RunSlideshowLoop(_slideshowCts.Token);
+    }
+
+    public void StopContinuousMode()
+    {
+        if (!IsContinuousMode) return;
+        _slideshowCts?.Cancel();
+        _slideshowCts?.Dispose();
+        _slideshowCts = null;
+        IsContinuousMode = false;
+        IsSlideshowPaused = false;
+        ExitContinuousView?.Invoke();
+    }
+
+    private async Task RunSlideshowLoop(CancellationToken ct)
+    {
+        var intervalMs = _appSettings.SlideshowIntervalSeconds * 1000;
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(intervalMs, ct);
+                if (ct.IsCancellationRequested) break;
+                await NavigateImage(1);
+            }
+            catch (TaskCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
     // --- Helpers ---
 
     private void ExitOtherModes()
@@ -858,6 +946,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        _slideshowCts?.Cancel();
+        _slideshowCts?.Dispose();
         _previewDebounceCts?.Cancel();
         _previewDebounceCts?.Dispose();
         _bitmapPool[0]?.Dispose();

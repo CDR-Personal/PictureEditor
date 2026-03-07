@@ -40,7 +40,7 @@
 
     <DockPanel>
         <!-- Menu Bar -->
-        <Menu DockPanel.Dock="Top">
+        <Menu DockPanel.Dock="Top" IsVisible="{Binding !IsContinuousMode}">
             <MenuItem Header="_File">
                 <MenuItem Header="_Open File..." Command="{Binding OpenFileCommand}" InputGesture="Cmd+O"/>
                 <MenuItem Header="Open _Folder..." Command="{Binding OpenFolderCommand}" InputGesture="Cmd+Shift+O"/>
@@ -67,7 +67,8 @@
         <!-- Toolbar (vertical, left side) -->
         <Border DockPanel.Dock="Left" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
                 Padding="4,6" BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
-                BorderThickness="0,0,1,0">
+                BorderThickness="0,0,1,0"
+                IsVisible="{Binding !IsContinuousMode}">
             <StackPanel Orientation="Vertical" Spacing="4">
                 <Button Content="Open File" Command="{Binding OpenFileCommand}" ToolTip.Tip="Open image file (Cmd+O)" HorizontalAlignment="Stretch"/>
                 <Button Content="Open Folder" Command="{Binding OpenFolderCommand}" ToolTip.Tip="Open folder (Cmd+Shift+O)" HorizontalAlignment="Stretch"/>
@@ -91,7 +92,8 @@
 
         <!-- Status Bar -->
         <Border DockPanel.Dock="Bottom" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
-                Padding="8,4">
+                Padding="8,4"
+                IsVisible="{Binding !IsContinuousMode}">
             <DockPanel>
                 <TextBlock Text="{Binding ImageDimensions}" DockPanel.Dock="Right" Margin="8,0"/>
                 <TextBlock Text="{Binding StatusText}"/>
@@ -222,8 +224,11 @@
                 <!-- Navigation hints -->
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
                             VerticalAlignment="Bottom" Margin="0,0,0,8"
-                            IsVisible="{Binding HasImage}" Opacity="0.5">
-                    <TextBlock Text="Use Left/Right arrow keys to navigate images" FontSize="12" Foreground="#aaa"/>
+                            IsVisible="{Binding HasImage}" Opacity="0.5"
+                            IsHitTestVisible="False"
+                            x:Name="NavigationHints">
+                    <TextBlock Text="Use Left/Right arrow keys to navigate images" FontSize="12" Foreground="#aaa"
+                               IsVisible="{Binding !IsContinuousMode}"/>
                 </StackPanel>
             </Panel>
         </Border>
