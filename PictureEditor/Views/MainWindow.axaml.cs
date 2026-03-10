@@ -226,6 +226,13 @@ public partial class MainWindow : Window
                 ShowHelpDialog();
                 e.Handled = true;
                 break;
+            case Key.N:
+                if (e.KeyModifiers is KeyModifiers.Meta or KeyModifiers.Control)
+                {
+                    App.CreateNewWindow();
+                    e.Handled = true;
+                }
+                break;
         }
     }
 
@@ -253,6 +260,11 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnNewWindowClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        App.CreateNewWindow();
+    }
+
     private void OnHelpClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         ShowHelpDialog();
@@ -274,6 +286,7 @@ public partial class MainWindow : Window
 
         var hotkeys = new (string Key, string Description)[]
         {
+            ($"{mod}+N", "New Window"),
             ($"{mod}+O", "Open File"),
             ($"{mod}+Shift+O", "Open Folder"),
             ($"{mod}+S", "Save"),

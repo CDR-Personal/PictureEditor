@@ -729,10 +729,15 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (!HasImage || _directoryImages.Count == 0) return;
 
+        // Only one window may be in slideshow mode at a time
+        if (App.ContinuousModeOwner != null && App.ContinuousModeOwner != this)
+            return;
+
         CommitPendingPreview();
         ExitOtherModes();
         IsContinuousMode = true;
         IsSlideshowPaused = false;
+        App.ContinuousModeOwner = this;
         EnterContinuousView?.Invoke();
 
         _slideshowCts?.Cancel();
@@ -757,6 +762,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         _slideshowCts = null;
         IsContinuousMode = false;
         IsSlideshowPaused = false;
+        if (App.ContinuousModeOwner == this)
+            App.ContinuousModeOwner = null;
         ExitContinuousView?.Invoke();
     }
 
@@ -921,9 +928,11 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (_currentDirectory != null)
         {
             _directoryImages = ImageEditorService.GetImagesInDirectory(_currentDirectory, _sortOrder);
-            if (_currentFilePath != null)
-                _currentImageIndex = _directoryImages.IndexOf(_currentFilePath);
-            UpdateTitle();
+            if (_directoryImages.Count > 0)
+            {
+                _currentImageIndex = 0;
+                await LoadFile(_directoryImages[0]);
+            }
         }
     }
 
@@ -946,6 +955,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        if (App.ContinuousModeOwner == this)
+            App.ContinuousModeOwner = null;
         _slideshowCts?.Cancel();
         _slideshowCts?.Dispose();
         _previewDebounceCts?.Cancel();

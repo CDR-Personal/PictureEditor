@@ -42,6 +42,8 @@
         <!-- Menu Bar -->
         <Menu DockPanel.Dock="Top" IsVisible="{Binding !IsContinuousMode}">
             <MenuItem Header="_File">
+                <MenuItem Header="_New Window" Click="OnNewWindowClick" InputGesture="Cmd+N"/>
+                <Separator/>
                 <MenuItem Header="_Open File..." Command="{Binding OpenFileCommand}" InputGesture="Cmd+O"/>
                 <MenuItem Header="Open _Folder..." Command="{Binding OpenFolderCommand}" InputGesture="Cmd+Shift+O"/>
                 <Separator/>
