@@ -75,7 +75,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public Func<Task<string?>>? OpenFileDialog { get; set; }
     public Func<Task<string?>>? OpenFolderDialog { get; set; }
-    public Func<string, Task<string?>>? SaveFileDialog { get; set; }
+    public Func<string, string?, Task<string?>>? SaveFileDialog { get; set; }
     public Func<string, string, Task<bool>>? ConfirmDialog { get; set; }
     public Func<string, string, string, Task<string?>>? TextInputDialog { get; set; }
     public Func<ImageSortOrder, Task<ImageSortOrder?>>? SortDialog { get; set; }
@@ -552,7 +552,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         CommitPendingPreview();
 
         var defaultName = _currentFilePath != null ? Path.GetFileName(_currentFilePath) : "image.png";
-        var filePath = SaveFileDialog != null ? await SaveFileDialog(defaultName) : null;
+        var sourceDir = _currentFilePath != null ? Path.GetDirectoryName(_currentFilePath) : null;
+        var filePath = SaveFileDialog != null ? await SaveFileDialog(defaultName, sourceDir) : null;
         if (filePath == null)
         {
             ReEnterPreviewMode(wasAdjustMode, wasResizeMode, wasRotateMode);
@@ -933,6 +934,33 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 _currentImageIndex = 0;
                 await LoadFile(_directoryImages[0]);
             }
+        }
+    }
+
+    public async Task ReloadDirectory()
+    {
+        if (_currentDirectory == null) return;
+
+        var currentFile = _currentFilePath;
+        RefreshDirectoryListing(_currentDirectory, force: true);
+
+        if (_directoryImages.Count == 0)
+        {
+            SetTitleStatus("No images found in directory");
+            return;
+        }
+
+        // Try to stay on the same image, otherwise load the first
+        var idx = currentFile != null ? _directoryImages.IndexOf(currentFile) : -1;
+        if (idx >= 0)
+        {
+            _currentImageIndex = idx;
+            await LoadFile(_directoryImages[idx]);
+        }
+        else
+        {
+            _currentImageIndex = 0;
+            await LoadFile(_directoryImages[0]);
         }
     }
 

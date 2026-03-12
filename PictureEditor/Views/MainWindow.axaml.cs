@@ -149,6 +149,14 @@ public partial class MainWindow : Window
         bool inputHasFocus = FocusManager?.GetFocusedElement() is
             NumericUpDown or TextBox or Avalonia.Controls.Primitives.RangeBase;
 
+        // Cmd+W / Ctrl+W to close window
+        if (e.Key == Key.W && (e.KeyModifiers.HasFlag(KeyModifiers.Meta) || e.KeyModifiers.HasFlag(KeyModifiers.Control)))
+        {
+            Close();
+            e.Handled = true;
+            return;
+        }
+
         switch (e.Key)
         {
             case Key.Left:
@@ -226,6 +234,10 @@ public partial class MainWindow : Window
                 ShowHelpDialog();
                 e.Handled = true;
                 break;
+            case Key.F12:
+                HandleReloadAsync(vm);
+                e.Handled = true;
+                break;
             case Key.N:
                 if (e.KeyModifiers is KeyModifiers.Meta or KeyModifiers.Control)
                 {
@@ -239,6 +251,12 @@ public partial class MainWindow : Window
     private async void HandleRenameAsync(MainWindowViewModel vm)
     {
         try { await vm.RenameFileCommand.ExecuteAsync(null); }
+        catch (Exception ex) { vm.Title = $"Cedar Image Editor — Error: {ex.Message}"; }
+    }
+
+    private async void HandleReloadAsync(MainWindowViewModel vm)
+    {
+        try { await vm.ReloadDirectory(); }
         catch (Exception ex) { vm.Title = $"Cedar Image Editor — Error: {ex.Message}"; }
     }
 
@@ -276,7 +294,7 @@ public partial class MainWindow : Window
         {
             Title = "Keyboard Shortcuts",
             Width = 420,
-            Height = 480,
+            Height = 550,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false
         };
@@ -303,6 +321,7 @@ public partial class MainWindow : Window
             ("Enter", "Apply Crop"),
             ("Space", "Start/Stop Slideshow"),
             ("Escape", "Cancel Current Mode"),
+            ("F12", "Reload Current Folder"),
             ("F1", "Show This Help"),
         };
 
@@ -389,9 +408,9 @@ public partial class MainWindow : Window
         return folders.FirstOrDefault()?.Path.LocalPath;
     }
 
-    private async Task<string?> ShowSaveFileDialog(string defaultName)
+    private async Task<string?> ShowSaveFileDialog(string defaultName, string? sourceDir)
     {
-        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        var options = new FilePickerSaveOptions
         {
             Title = "Save Image As",
             SuggestedFileName = defaultName,
@@ -401,7 +420,14 @@ public partial class MainWindow : Window
                 new FilePickerFileType("JPEG") { Patterns = new[] { "*.jpg", "*.jpeg" } },
                 new FilePickerFileType("WebP") { Patterns = new[] { "*.webp" } }
             }
-        });
+        };
+
+        if (sourceDir != null)
+        {
+            options.SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(sourceDir);
+        }
+
+        var file = await StorageProvider.SaveFilePickerAsync(options);
         return file?.Path.LocalPath;
     }
 

@@ -52,9 +52,15 @@ echo "=== Installing to /Applications ==="
 rm -rf "/Applications/${APP_NAME}.app"
 cp -R "${APP_BUNDLE}" "/Applications/${APP_NAME}.app"
 
+# Copy to ~/Downloads
+echo "=== Copying to ~/Downloads ==="
+rm -rf "${HOME}/Downloads/${APP_NAME}.app"
+cp -R "${APP_BUNDLE}" "${HOME}/Downloads/${APP_NAME}.app"
+
 echo ""
 echo "=== Build complete ==="
 echo "App bundle: ${APP_BUNDLE}"
 echo "Installed:  /Applications/${APP_NAME}.app"
+echo "Download:   ~/Downloads/${APP_NAME}.app"
 echo ""
 echo "To run:  open /Applications/${APP_NAME}.app"
