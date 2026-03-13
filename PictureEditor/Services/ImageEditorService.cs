@@ -500,6 +500,45 @@ public class ImageEditorService : IDisposable
         _currentImage.Mutate(ctx => ctx.Crop(new Rectangle(x, y, width, height)));
     }
 
+    public void RemoveVerticalStrip(int x, int width)
+    {
+        if (_currentImage == null) return;
+        x = Math.Max(0, Math.Min(x, _currentImage.Width - 1));
+        width = Math.Min(width, _currentImage.Width - x);
+        if (width <= 0 || width >= _currentImage.Width) return;
+
+        PushUndo();
+
+        int srcW = _currentImage.Width;
+        int srcH = _currentImage.Height;
+        int newW = srcW - width;
+
+        var result = new Image<Rgba32>(newW, srcH);
+
+        // Copy left portion (0 to x) and right portion (x+width to end)
+        _currentImage.ProcessPixelRows(result, (srcAcc, dstAcc) =>
+        {
+            for (int y = 0; y < srcAcc.Height; y++)
+            {
+                var srcRow = srcAcc.GetRowSpan(y);
+                var dstRow = dstAcc.GetRowSpan(y);
+
+                // Left portion
+                if (x > 0)
+                    srcRow.Slice(0, x).CopyTo(dstRow);
+
+                // Right portion
+                int rightStart = x + width;
+                int rightLen = srcW - rightStart;
+                if (rightLen > 0)
+                    srcRow.Slice(rightStart, rightLen).CopyTo(dstRow.Slice(x));
+            }
+        });
+
+        _currentImage.Dispose();
+        _currentImage = result;
+    }
+
     public void SaveImage(string filePath)
     {
         if (_currentImage == null) return;

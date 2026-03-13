@@ -71,6 +71,11 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _cropWidth;
     [ObservableProperty] private int _cropHeight;
 
+    // Strip removal
+    [ObservableProperty] private bool _isStripMode;
+    [ObservableProperty] private int _stripX;
+    [ObservableProperty] private int _stripWidth = 1;
+
     public string? StartupFilePath { get; set; }
 
     public Func<Task<string?>>? OpenFileDialog { get; set; }
@@ -245,7 +250,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Commit any pending preview before navigating
         CommitPendingPreview();
 
-        if (_hasUnsavedChanges)
+        if (_hasUnsavedChanges && _editor.CanUndo)
         {
             var discard = ConfirmDialog != null
                 ? await ConfirmDialog("Unsaved Changes", "You have unsaved changes. Discard them?")
@@ -405,6 +410,59 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         CropHeight = _editor.ImageHeight;
     }
 
+    // --- Strip removal mode ---
+
+    [RelayCommand]
+    private void ToggleStripMode()
+    {
+        if (IsStripMode)
+        {
+            ApplyStripIfNeeded();
+            SwitchStripToCrop();
+        }
+        else
+        {
+            CommitPendingPreview();
+            ExitOtherModes();
+            IsStripMode = true;
+            if (_editor.HasImage)
+            {
+                StripX = _editor.ImageWidth / 3;
+                StripWidth = _editor.ImageWidth / 3;
+            }
+        }
+    }
+
+    public void ApplyStripIfNeeded()
+    {
+        if (!_editor.HasImage || !IsStripMode) return;
+        if (StripWidth <= 0 || StripWidth >= _editor.ImageWidth) return;
+        _editor.RemoveVerticalStrip(StripX, StripWidth);
+        MarkChanged();
+        InvalidateBitmapPool();
+        RefreshDisplay();
+    }
+
+    public void ApplyStripAndStay()
+    {
+        if (!_editor.HasImage || !IsStripMode) return;
+        ApplyStripIfNeeded();
+        SwitchStripToCrop();
+    }
+
+    private void SwitchStripToCrop()
+    {
+        IsStripMode = false;
+        IsCropMode = true;
+        if (_editor.HasImage)
+        {
+            CropX = 0;
+            CropY = 0;
+            CropWidth = _editor.ImageWidth;
+            CropHeight = _editor.ImageHeight;
+        }
+    }
+
     public void CancelCurrentMode()
     {
         if (IsAdjustMode && _editor.HasPreviewBase)
@@ -434,6 +492,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             RefreshDisplay();
         }
         IsCropMode = false;
+        IsStripMode = false;
         IsResizeMode = false;
         IsAdjustMode = false;
         IsRotateMode = false;
@@ -699,6 +758,29 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public async Task JumpToImage()
+    {
+        if (_directoryImages.Count == 0) return;
+
+        var result = TextInputDialog != null
+            ? await TextInputDialog("Jump To Image",
+                $"Enter image number (1–{_directoryImages.Count}):",
+                $"{_currentImageIndex + 1}")
+            : null;
+        if (result == null) return;
+
+        if (int.TryParse(result, out int num) && num >= 1 && num <= _directoryImages.Count)
+        {
+            var idx = num - 1;
+            if (idx != _currentImageIndex)
+                await LoadFile(_directoryImages[idx]);
+        }
+        else
+        {
+            SetTitleStatus($"Invalid number — enter 1 to {_directoryImages.Count}");
+        }
+    }
+
     // --- Continuous/Slideshow mode ---
 
     public Action? EnterContinuousView { get; set; }
@@ -795,6 +877,11 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             ApplyCropIfNeeded();
             IsCropMode = false;
         }
+        if (IsStripMode)
+        {
+            ApplyStripIfNeeded();
+            IsStripMode = false;
+        }
         if (IsAdjustMode)
         {
             CommitPendingPreview();
@@ -858,8 +945,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ImagePixelWidthValue = w;
         ImagePixelHeightValue = h;
         ImageDimensions = $"{w} x {h}";
-        StatusText = $"{Path.GetFileName(_currentFilePath)} | {w}x{h}";
         UpdateTitle();
+        UpdateStatusText();
     }
 
     private void MarkChanged()
@@ -880,10 +967,22 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         Title = $"Cedar Image Editor - {name}{modified}{counter}{status}";
     }
 
+    private void UpdateStatusText()
+    {
+        if (_currentFilePath == null) return;
+        var name = Path.GetFileName(_currentFilePath);
+        var counter = _directoryImages.Count > 0 && _currentImageIndex >= 0
+            ? $" ({_currentImageIndex + 1} of {_directoryImages.Count})"
+            : "";
+        var status = _titleStatus != null ? $" — {_titleStatus}" : "";
+        StatusText = $"{name}{counter} | {ImagePixelWidthValue}x{ImagePixelHeightValue}{status}";
+    }
+
     private void SetTitleStatus(string message)
     {
         _titleStatus = message;
         UpdateTitle();
+        UpdateStatusText();
     }
 
     private void ReinitializeActiveMode()
@@ -894,6 +993,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             CropY = 0;
             CropWidth = _editor.ImageWidth;
             CropHeight = _editor.ImageHeight;
+        }
+        if (IsStripMode && _editor.HasImage)
+        {
+            SwitchStripToCrop();
         }
         if (IsResizeMode)
         {

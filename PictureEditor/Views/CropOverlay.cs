@@ -36,7 +36,6 @@ public class CropOverlay : Control
     private static readonly IPen BorderPenShadow = new Pen(new SolidColorBrush(Color.FromArgb(128, 0, 0, 0)), 2);
     private static readonly IBrush HandleFill = Brushes.White;
     private static readonly IPen HandlePen = new Pen(new SolidColorBrush(Color.FromArgb(200, 0, 0, 0)), 1);
-    private static readonly IPen ThirdsPen = new Pen(new SolidColorBrush(Color.FromArgb(80, 255, 255, 255)), 1);
     private static readonly IBrush LabelBackgroundBrush = new SolidColorBrush(Color.FromArgb(180, 0, 0, 0));
     private static readonly Typeface LabelTypeface = new("Inter", FontStyle.Normal, FontWeight.Normal);
     private const double HandleSize = 10;
@@ -135,15 +134,6 @@ public class CropOverlay : Control
         // Draw crop border (shadow first, then dashed white)
         context.DrawRectangle(BorderPenShadow, cropScreen);
         context.DrawRectangle(BorderPen, cropScreen);
-
-        // Draw rule-of-thirds lines
-        for (int i = 1; i <= 2; i++)
-        {
-            double x = cropScreen.Left + cropScreen.Width * i / 3.0;
-            double y = cropScreen.Top + cropScreen.Height * i / 3.0;
-            context.DrawLine(ThirdsPen, new Point(x, cropScreen.Top), new Point(x, cropScreen.Bottom));
-            context.DrawLine(ThirdsPen, new Point(cropScreen.Left, y), new Point(cropScreen.Right, y));
-        }
 
         // Draw 8 resize handles
         DrawHandle(context, cropScreen.TopLeft);

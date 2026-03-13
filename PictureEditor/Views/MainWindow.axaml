@@ -56,6 +56,7 @@
                 <MenuItem Header="Rotate _Left" Command="{Binding RotateLeftCommand}" InputGesture="Cmd+L"/>
                 <MenuItem Header="Rotate _Right" Command="{Binding RotateRightCommand}" InputGesture="Cmd+R"/>
                 <MenuItem Header="_Crop" Command="{Binding ToggleCropModeCommand}" InputGesture="Cmd+Shift+C"/>
+                <MenuItem Header="Remove _Strip" Command="{Binding ToggleStripModeCommand}"/>
                 <MenuItem Header="Re_size" Command="{Binding ToggleResizeModeCommand}"/>
                 <MenuItem Header="_Adjustments" Command="{Binding ToggleAdjustModeCommand}"/>
                 <Separator/>
@@ -81,6 +82,7 @@
                 <Button Content="Rotate Right" Command="{Binding RotateRightCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Rotate right (Cmd+R)" HorizontalAlignment="Stretch"/>
                 <Button Content="Fine Rotate" Command="{Binding ToggleRotateModeCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Rotate by degree (Up/Down keys)" HorizontalAlignment="Stretch"/>
                 <Button Content="Crop" Command="{Binding ToggleCropModeCommand}" IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"/>
+                <Button Content="Remove Strip" Command="{Binding ToggleStripModeCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Remove a vertical strip from the image" HorizontalAlignment="Stretch"/>
                 <Button Content="Resize" Command="{Binding ToggleResizeModeCommand}" IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"/>
                 <Button Content="Adjust" Command="{Binding ToggleAdjustModeCommand}" IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"/>
                 <Button Content="Auto Color" Command="{Binding AutoColorCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Automatic color correction (Cmd+A)" HorizontalAlignment="Stretch"/>
@@ -126,6 +128,27 @@
                 <NumericUpDown Value="{Binding CropHeight}" Minimum="1" Increment="1" FormatString="0"/>
 
                 <TextBlock Text="Press Enter to apply crop. Escape to cancel." Opacity="0.5" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Side Panel: Strip Removal -->
+        <Border DockPanel.Dock="Right" Width="260"
+                Background="{DynamicResource SystemControlBackgroundChromeLowBrush}"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                BorderThickness="1,0,0,0"
+                Padding="12"
+                IsVisible="{Binding IsStripMode}">
+            <StackPanel Spacing="10">
+                <TextBlock Text="Remove Strip" FontSize="18" FontWeight="Bold"/>
+                <TextBlock Text="Select a vertical strip to remove. The left and right portions will be joined together." Opacity="0.7" TextWrapping="Wrap" FontSize="12"/>
+
+                <TextBlock Text="X:"/>
+                <NumericUpDown Value="{Binding StripX}" Minimum="0" Increment="1" FormatString="0"/>
+
+                <TextBlock Text="Width:"/>
+                <NumericUpDown Value="{Binding StripWidth}" Minimum="1" Increment="1" FormatString="0"/>
+
+                <TextBlock Text="Press Enter to apply. Escape to cancel." Opacity="0.5" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
             </StackPanel>
         </Border>
 
@@ -221,6 +244,13 @@
                                    CropHeight="{Binding CropHeight, Mode=TwoWay}"
                                    ImagePixelWidth="{Binding ImagePixelWidthValue}"
                                    ImagePixelHeight="{Binding ImagePixelHeightValue}"/>
+
+                    <!-- Strip removal overlay -->
+                    <v:StripOverlay IsVisible="{Binding IsStripMode}"
+                                    StripX="{Binding StripX, Mode=TwoWay}"
+                                    StripWidth="{Binding StripWidth, Mode=TwoWay}"
+                                    ImagePixelWidth="{Binding ImagePixelWidthValue}"
+                                    ImagePixelHeight="{Binding ImagePixelHeightValue}"/>
                 </Panel>
 
                 <!-- Navigation hints -->

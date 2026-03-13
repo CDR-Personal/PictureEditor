@@ -193,6 +193,11 @@ public partial class MainWindow : Window
                     vm.ApplyCropAndStay();
                     e.Handled = true;
                 }
+                else if (vm.IsStripMode && !inputHasFocus)
+                {
+                    vm.ApplyStripAndStay();
+                    e.Handled = true;
+                }
                 break;
             case Key.Delete:
             case Key.Back:
@@ -216,7 +221,7 @@ public partial class MainWindow : Window
                     Focus();
                     e.Handled = true;
                 }
-                else if (vm.IsCropMode || vm.IsResizeMode || vm.IsAdjustMode || vm.IsRotateMode)
+                else if (vm.IsCropMode || vm.IsStripMode || vm.IsResizeMode || vm.IsAdjustMode || vm.IsRotateMode)
                 {
                     vm.CancelCurrentMode();
                     Focus();
@@ -245,12 +250,25 @@ public partial class MainWindow : Window
                     e.Handled = true;
                 }
                 break;
+            case Key.J:
+                if (e.KeyModifiers is KeyModifiers.Meta or KeyModifiers.Control)
+                {
+                    HandleJumpToAsync(vm);
+                    e.Handled = true;
+                }
+                break;
         }
     }
 
     private async void HandleRenameAsync(MainWindowViewModel vm)
     {
         try { await vm.RenameFileCommand.ExecuteAsync(null); }
+        catch (Exception ex) { vm.Title = $"Cedar Image Editor — Error: {ex.Message}"; }
+    }
+
+    private async void HandleJumpToAsync(MainWindowViewModel vm)
+    {
+        try { await vm.JumpToImage(); }
         catch (Exception ex) { vm.Title = $"Cedar Image Editor — Error: {ex.Message}"; }
     }
 
@@ -294,7 +312,7 @@ public partial class MainWindow : Window
         {
             Title = "Keyboard Shortcuts",
             Width = 420,
-            Height = 550,
+            Height = 700,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false
         };
@@ -314,15 +332,17 @@ public partial class MainWindow : Window
             ($"{mod}+R", "Rotate Right"),
             ($"{mod}+Shift+C", "Crop Mode"),
             ($"{mod}+A", "Auto Color"),
-            ("Up / Down", "Fine Rotate (in rotate mode)"),
-            ("F2", "Rename Current File"),
-            ("Delete", "Delete Current File"),
+            ($"{mod}+J", "Jump To Image"),
+            ($"{mod}+W", "Close Window"),
             ("Left / Right", "Navigate Images"),
-            ("Enter", "Apply Crop"),
+            ("Up / Down", "Fine Rotate (in rotate mode)"),
+            ("Enter", "Apply Crop / Strip"),
             ("Space", "Start/Stop Slideshow"),
             ("Escape", "Cancel Current Mode"),
-            ("F12", "Reload Current Folder"),
             ("F1", "Show This Help"),
+            ("F2", "Rename Current File"),
+            ("F12", "Reload Current Folder"),
+            ("Delete", "Delete Current File"),
         };
 
         var list = new StackPanel { Spacing = 4 };
@@ -372,7 +392,7 @@ public partial class MainWindow : Window
                 new ScrollViewer
                 {
                     Content = list,
-                    MaxHeight = 340
+                    MaxHeight = 520
                 },
                 closeButton
             }
