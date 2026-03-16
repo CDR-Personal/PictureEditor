@@ -257,6 +257,13 @@ public partial class MainWindow : Window
                     e.Handled = true;
                 }
                 break;
+            case Key.X:
+                if (e.KeyModifiers is KeyModifiers.Meta or KeyModifiers.Control && vm.HasImage)
+                {
+                    vm.ToggleStripModeCommand.Execute(null);
+                    e.Handled = true;
+                }
+                break;
         }
     }
 
@@ -331,6 +338,7 @@ public partial class MainWindow : Window
             ($"{mod}+L", "Rotate Left"),
             ($"{mod}+R", "Rotate Right"),
             ($"{mod}+Shift+C", "Crop Mode"),
+            ($"{mod}+X", "Remove Strip Mode"),
             ($"{mod}+A", "Auto Color"),
             ($"{mod}+J", "Jump To Image"),
             ($"{mod}+W", "Close Window"),
@@ -375,6 +383,15 @@ public partial class MainWindow : Window
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
         };
         closeButton.Click += (_, _) => dialog.Close();
+
+        dialog.KeyDown += (_, ke) =>
+        {
+            if (ke.Key is Key.Escape or Key.Enter)
+            {
+                dialog.Close();
+                ke.Handled = true;
+            }
+        };
 
         dialog.Content = new StackPanel
         {

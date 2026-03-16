@@ -56,7 +56,7 @@
                 <MenuItem Header="Rotate _Left" Command="{Binding RotateLeftCommand}" InputGesture="Cmd+L"/>
                 <MenuItem Header="Rotate _Right" Command="{Binding RotateRightCommand}" InputGesture="Cmd+R"/>
                 <MenuItem Header="_Crop" Command="{Binding ToggleCropModeCommand}" InputGesture="Cmd+Shift+C"/>
-                <MenuItem Header="Remove _Strip" Command="{Binding ToggleStripModeCommand}"/>
+                <MenuItem Header="Remove _Strip" Command="{Binding ToggleStripModeCommand}" InputGesture="Cmd+X"/>
                 <MenuItem Header="Re_size" Command="{Binding ToggleResizeModeCommand}"/>
                 <MenuItem Header="_Adjustments" Command="{Binding ToggleAdjustModeCommand}"/>
                 <Separator/>
