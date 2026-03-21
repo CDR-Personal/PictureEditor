@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet --version)",
+      "Bash(dotnet --list-sdks)",
+      "Bash(dotnet new list)",
+      "Bash(dotnet new avalonia.mvvm -n PictureEditor --framework net8.0)",
+      "Bash(dotnet new avalonia.mvvm -n PictureEditor)",
+      "Bash(dotnet add package SixLabors.ImageSharp)",
+      "Bash(dotnet build)",
+      "Bash(chmod +x /Users/chrisr/MyStuff/PictureEditor/publish-macos.sh /Users/chrisr/MyStuff/PictureEditor/publish-windows.sh)",
+      "Bash(./publish-macos.sh arm64)",
+      "Bash(bash publish-windows.sh x64)",
+      "Bash(python3 -c \"from PIL import Image; print\\(''PIL available''\\)\")",
+      "Bash(pip3 install Pillow)",
+      "Bash(pip3 install --user Pillow)",
+      "Bash(python3:*)",
+      "Bash(sips -z 48 48 colored-pencils-color.jpg --out AppIcon.iconset/icon_48x48.png -s format png)",
+      "Bash(dotnet build PictureEditor/PictureEditor.csproj)",
+      "Bash(sips -z 16 16 colored-pencils-color-dark.jpg --out icon_dark_16.png -s format png)",
+      "Bash(sips -z 32 32 colored-pencils-color-dark.jpg --out icon_dark_32.png -s format png)",
+      "Bash(sips -z 48 48 colored-pencils-color-dark.jpg --out icon_dark_48.png -s format png)",
+      "Bash(sips -z 64 64 colored-pencils-color-dark.jpg --out icon_dark_64.png -s format png)",
+      "Bash(sips -z 128 128 colored-pencils-color-dark.jpg --out icon_dark_128.png -s format png)",
+      "Bash(sips -z 256 256 colored-pencils-color-dark.jpg --out icon_dark_256.png -s format png)",
+      "Bash(bash publish-macos.sh arm64)",
+      "Bash(git init)",
+      "Bash(git status -u)",
+      "Bash(git add .gitignore .vscode/tasks.json PictureEditor.sln PictureEditor/App.axaml PictureEditor/App.axaml.cs PictureEditor/Assets/AppIcon.icns PictureEditor/Assets/Info.plist PictureEditor/Assets/app.ico PictureEditor/Assets/avalonia-logo.ico PictureEditor/Assets/colored-pencils-color-dark.jpg PictureEditor/Assets/colored-pencils-color.jpg PictureEditor/PictureEditor.csproj PictureEditor/Program.cs PictureEditor/Services/ImageEditorService.cs PictureEditor/Services/WindowSettings.cs PictureEditor/ViewModels/MainWindowViewModel.cs PictureEditor/ViewModels/ViewModelBase.cs PictureEditor/Views/CropOverlay.cs PictureEditor/Views/MainWindow.axaml PictureEditor/Views/MainWindow.axaml.cs PictureEditor/app.manifest publish-macos.sh publish-windows.ps1 publish-windows.sh)",
+      "Bash(git commit:*)",
+      "Bash(gh repo create PictureEditor --public --source=. --push)",
+      "Bash(brew install gh)",
+      "Bash(gh auth status)",
+      "Bash(git add PictureEditor/App.axaml.cs PictureEditor/Assets/Info.plist PictureEditor/PictureEditor.csproj PictureEditor/Services/ImageEditorService.cs PictureEditor/ViewModels/MainWindowViewModel.cs PictureEditor/Views/CropOverlay.cs PictureEditor/Views/MainWindow.axaml PictureEditor/Views/MainWindow.axaml.cs)",
+      "Bash(git push)",
+      "Bash(git add:*)",
+      "Bash(dotnet build:*)"
+    ]
+  }
+}

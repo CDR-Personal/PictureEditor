@@ -23,6 +23,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private int _currentImageIndex = -1;
     private bool _hasUnsavedChanges;
     private ImageSortOrder _sortOrder = ImageSortOrder.NameAsc;
+    private bool _includeSubdirectories;
     private string? _titleStatus;
     private bool _suppressPreviewUpdate;
     private CancellationTokenSource? _previewDebounceCts;
@@ -229,7 +230,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         var folderPath = OpenFolderDialog != null ? await OpenFolderDialog() : null;
         if (folderPath == null) return;
 
-        _directoryImages = ImageEditorService.GetImagesInDirectory(folderPath);
+        bool includeSubdirs = false;
+        try
+        {
+            if (Directory.GetDirectories(folderPath).Length > 0 && ConfirmDialog != null)
+                includeSubdirs = await ConfirmDialog("Include Subdirectories",
+                    "This folder contains subdirectories. Include images from all subdirectories?");
+        }
+        catch { /* ignore permission errors */ }
+
+        _includeSubdirectories = includeSubdirs;
+        _currentDirectory = folderPath;
+        _directoryImages = ImageEditorService.GetImagesInDirectory(folderPath, _sortOrder, _includeSubdirectories);
         if (_directoryImages.Count == 0)
         {
             SetTitleStatus("No supported images found in directory");
@@ -273,9 +285,18 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
             _titleStatus = null;
 
-            var dir = Path.GetDirectoryName(filePath)!;
-            RefreshDirectoryListing(dir);
-            _currentImageIndex = _directoryImages.IndexOf(filePath);
+            var existingIndex = _directoryImages.IndexOf(filePath);
+            if (existingIndex >= 0)
+            {
+                _currentImageIndex = existingIndex;
+            }
+            else
+            {
+                var dir = Path.GetDirectoryName(filePath)!;
+                _includeSubdirectories = false;
+                RefreshDirectoryListing(dir, force: true);
+                _currentImageIndex = _directoryImages.IndexOf(filePath);
+            }
 
             RefreshDisplay();
             ReinitializeActiveMode();
@@ -1031,7 +1052,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         _sortOrder = result.Value;
         if (_currentDirectory != null)
         {
-            _directoryImages = ImageEditorService.GetImagesInDirectory(_currentDirectory, _sortOrder);
+            _directoryImages = ImageEditorService.GetImagesInDirectory(_currentDirectory, _sortOrder, _includeSubdirectories);
             if (_directoryImages.Count > 0)
             {
                 _currentImageIndex = 0;
@@ -1072,7 +1093,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (!force && string.Equals(_currentDirectory, directory, StringComparison.OrdinalIgnoreCase))
             return;
         _currentDirectory = directory;
-        _directoryImages = ImageEditorService.GetImagesInDirectory(directory, _sortOrder);
+        _directoryImages = ImageEditorService.GetImagesInDirectory(directory, _sortOrder, _includeSubdirectories);
     }
 
     private void ResetAdjustments()

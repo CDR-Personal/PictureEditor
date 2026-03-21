@@ -562,10 +562,11 @@ public class ImageEditorService : IDisposable
     }
 
     public static List<string> GetImagesInDirectory(string directoryPath,
-        ImageSortOrder sort = ImageSortOrder.NameAsc)
+        ImageSortOrder sort = ImageSortOrder.NameAsc, bool includeSubdirectories = false)
     {
         if (!Directory.Exists(directoryPath)) return new List<string>();
-        var files = Directory.EnumerateFiles(directoryPath)
+        var searchOption = includeSubdirectories ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+        var files = Directory.EnumerateFiles(directoryPath, "*", searchOption)
             .Where(f => !Path.GetFileName(f).StartsWith("._") &&
                         SupportedExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()));
 
