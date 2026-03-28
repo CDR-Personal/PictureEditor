@@ -980,12 +980,24 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private void UpdateTitle()
     {
         var name = _currentFilePath != null ? Path.GetFileName(_currentFilePath) : "";
+        var fileSize = "";
+        if (_currentFilePath != null && File.Exists(_currentFilePath))
+        {
+            var bytes = new FileInfo(_currentFilePath).Length;
+            fileSize = bytes switch
+            {
+                >= 1_073_741_824 => $" {bytes / 1_073_741_824.0:F1}gb",
+                >= 1_048_576 => $" {bytes / 1_048_576.0:F1}mb",
+                >= 1_024 => $" {bytes / 1_024.0:F1}kb",
+                _ => $" {bytes}b"
+            };
+        }
         var modified = _hasUnsavedChanges ? " *" : "";
         var counter = _directoryImages.Count > 0 && _currentImageIndex >= 0
             ? $" ({_currentImageIndex + 1} of {_directoryImages.Count})"
             : "";
         var status = _titleStatus != null ? $" — {_titleStatus}" : "";
-        Title = $"Cedar Image Editor - {name}{modified}{counter}{status}";
+        Title = $"Cedar Image Editor - {name}{fileSize}{modified}{counter}{status}";
     }
 
     private void UpdateStatusText()
