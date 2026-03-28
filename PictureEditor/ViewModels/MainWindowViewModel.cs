@@ -8,6 +8,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -233,7 +234,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         bool includeSubdirs = false;
         try
         {
-            if (Directory.GetDirectories(folderPath).Length > 0 && ConfirmDialog != null)
+            if (Directory.GetDirectories(folderPath).Any(d => !Path.GetFileName(d).StartsWith('.')) && ConfirmDialog != null)
                 includeSubdirs = await ConfirmDialog("Include Subdirectories",
                     "This folder contains subdirectories. Include images from all subdirectories?");
         }
