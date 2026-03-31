@@ -29,6 +29,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _suppressPreviewUpdate;
     private CancellationTokenSource? _previewDebounceCts;
     private CancellationTokenSource? _slideshowCts;
+    private bool _isShuffleMode;
+    private List<int>? _shuffledOrder;
+    private int _shufflePosition;
     private int _adaptiveDebounceMs = 30;
     private readonly Stopwatch _renderStopwatch = new();
 
@@ -312,9 +315,52 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (_directoryImages.Count == 0) return;
 
-        var newIndex = _currentImageIndex + direction;
-        if (newIndex < 0) newIndex = _directoryImages.Count - 1;
-        if (newIndex >= _directoryImages.Count) newIndex = 0;
+        int newIndex;
+
+        if (_isShuffleMode && _shuffledOrder != null)
+        {
+            if (direction > 0)
+            {
+                if (_shufflePosition + 1 < _shuffledOrder.Count)
+                {
+                    _shufflePosition++;
+                }
+                else
+                {
+                    // All images shown — reshuffle, skip current to avoid repeat
+                    var currentDirIndex = _shuffledOrder[_shufflePosition];
+                    BuildShuffledOrder(currentDirIndex);
+                    if (_shuffledOrder.Count <= 1)
+                    {
+                        if (IsContinuousMode && !IsSlideshowPaused)
+                            RestartSlideshowTimer();
+                        return;
+                    }
+                    _shufflePosition = 1;
+                }
+                newIndex = _shuffledOrder[_shufflePosition];
+            }
+            else
+            {
+                if (_shufflePosition > 0)
+                {
+                    _shufflePosition--;
+                    newIndex = _shuffledOrder[_shufflePosition];
+                }
+                else
+                {
+                    if (IsContinuousMode && !IsSlideshowPaused)
+                        RestartSlideshowTimer();
+                    return;
+                }
+            }
+        }
+        else
+        {
+            newIndex = _currentImageIndex + direction;
+            if (newIndex < 0) newIndex = _directoryImages.Count - 1;
+            if (newIndex >= _directoryImages.Count) newIndex = 0;
+        }
 
         if (newIndex != _currentImageIndex)
             await LoadFile(_directoryImages[newIndex]);
@@ -706,6 +752,19 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (oldIndex >= 0 && oldIndex < _directoryImages.Count)
             _directoryImages.RemoveAt(oldIndex);
 
+        // Fix up shuffle order after deletion
+        if (_isShuffleMode && _shuffledOrder != null)
+        {
+            _shuffledOrder.Remove(oldIndex);
+            for (int i = 0; i < _shuffledOrder.Count; i++)
+            {
+                if (_shuffledOrder[i] > oldIndex)
+                    _shuffledOrder[i]--;
+            }
+            if (_shufflePosition >= _shuffledOrder.Count)
+                _shufflePosition = Math.Max(0, _shuffledOrder.Count - 1);
+        }
+
         // Navigate to next image (or previous if at end)
         if (_directoryImages.Count > 0)
         {
@@ -867,9 +926,55 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         _slideshowCts = null;
         IsContinuousMode = false;
         IsSlideshowPaused = false;
+        _isShuffleMode = false;
+        _shuffledOrder = null;
+        _shufflePosition = 0;
         if (App.ContinuousModeOwner == this)
             App.ContinuousModeOwner = null;
         ExitContinuousView?.Invoke();
+    }
+
+    public void ToggleShuffleMode()
+    {
+        if (!IsContinuousMode) return;
+
+        _isShuffleMode = !_isShuffleMode;
+
+        if (_isShuffleMode)
+        {
+            BuildShuffledOrder(_currentImageIndex);
+            SetTitleStatus("Shuffle on");
+        }
+        else
+        {
+            _shuffledOrder = null;
+            _shufflePosition = 0;
+            SetTitleStatus("Shuffle off");
+        }
+    }
+
+    private void BuildShuffledOrder(int startIndex)
+    {
+        var count = _directoryImages.Count;
+        _shuffledOrder = new List<int>(count);
+        _shuffledOrder.Add(startIndex);
+
+        var remaining = new List<int>(count - 1);
+        for (int i = 0; i < count; i++)
+        {
+            if (i != startIndex)
+                remaining.Add(i);
+        }
+
+        var rng = Random.Shared;
+        for (int i = remaining.Count - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            (remaining[i], remaining[j]) = (remaining[j], remaining[i]);
+        }
+
+        _shuffledOrder.AddRange(remaining);
+        _shufflePosition = 0;
     }
 
     private async Task RunSlideshowLoop(CancellationToken ct)
@@ -995,7 +1100,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
         var modified = _hasUnsavedChanges ? " *" : "";
         var counter = _directoryImages.Count > 0 && _currentImageIndex >= 0
-            ? $" ({_currentImageIndex + 1} of {_directoryImages.Count})"
+            ? (_isShuffleMode && _shuffledOrder != null
+                ? $" ({_shufflePosition + 1} of {_shuffledOrder.Count} shuffled)"
+                : $" ({_currentImageIndex + 1} of {_directoryImages.Count})")
             : "";
         var status = _titleStatus != null ? $" — {_titleStatus}" : "";
         Title = $"Cedar Image Editor - {name}{fileSize}{modified}{counter}{status}";
@@ -1006,7 +1113,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (_currentFilePath == null) return;
         var name = Path.GetFileName(_currentFilePath);
         var counter = _directoryImages.Count > 0 && _currentImageIndex >= 0
-            ? $" ({_currentImageIndex + 1} of {_directoryImages.Count})"
+            ? (_isShuffleMode && _shuffledOrder != null
+                ? $" ({_shufflePosition + 1} of {_shuffledOrder.Count} shuffled)"
+                : $" ({_currentImageIndex + 1} of {_directoryImages.Count})")
             : "";
         var status = _titleStatus != null ? $" — {_titleStatus}" : "";
         StatusText = $"{name}{counter} | {ImagePixelWidthValue}x{ImagePixelHeightValue}{status}";
@@ -1063,6 +1172,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (result == null || result == _sortOrder) return;
 
         _sortOrder = result.Value;
+        _isShuffleMode = false;
+        _shuffledOrder = null;
+        _shufflePosition = 0;
         if (_currentDirectory != null)
         {
             _directoryImages = ImageEditorService.GetImagesInDirectory(_currentDirectory, _sortOrder, _includeSubdirectories);
@@ -1077,6 +1189,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public async Task ReloadDirectory()
     {
         if (_currentDirectory == null) return;
+
+        _isShuffleMode = false;
+        _shuffledOrder = null;
+        _shufflePosition = 0;
 
         var currentFile = _currentFilePath;
         RefreshDirectoryListing(_currentDirectory, force: true);

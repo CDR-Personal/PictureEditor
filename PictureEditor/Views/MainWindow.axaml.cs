@@ -214,6 +214,15 @@ public partial class MainWindow : Window
                     e.Handled = true;
                 }
                 break;
+            case Key.Multiply:
+            case Key.D8:
+                if ((e.Key == Key.Multiply || e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+                    && !inputHasFocus && vm.IsContinuousMode)
+                {
+                    vm.ToggleShuffleMode();
+                    e.Handled = true;
+                }
+                break;
             case Key.Escape:
                 if (vm.IsContinuousMode)
                 {
@@ -346,6 +355,7 @@ public partial class MainWindow : Window
             ("Up / Down", "Fine Rotate (in rotate mode)"),
             ("Enter", "Apply Crop / Strip"),
             ("Space", "Start/Stop Slideshow"),
+            ("*", "Toggle Shuffle (in slideshow)"),
             ("Escape", "Cancel Current Mode"),
             ("F1", "Show This Help"),
             ("F2", "Rename Current File"),

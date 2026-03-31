@@ -34,7 +34,8 @@
       "Bash(git add PictureEditor/App.axaml.cs PictureEditor/Assets/Info.plist PictureEditor/PictureEditor.csproj PictureEditor/Services/ImageEditorService.cs PictureEditor/ViewModels/MainWindowViewModel.cs PictureEditor/Views/CropOverlay.cs PictureEditor/Views/MainWindow.axaml PictureEditor/Views/MainWindow.axaml.cs)",
       "Bash(git push)",
       "Bash(git add:*)",
-      "Bash(dotnet build:*)"
+      "Bash(dotnet build:*)",
+      "Bash(ls /Users/chrisr/MyStuff/PictureEditor/*.sln /Users/chrisr/MyStuff/PictureEditor/*.csproj)"
     ]
   }
 }
