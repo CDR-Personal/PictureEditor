@@ -44,6 +44,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     [ObservableProperty] private Bitmap? _displayImage;
     [ObservableProperty] private string _title = "Cedar Image Editor";
+    [ObservableProperty] private int _windowNumber;
+
+    partial void OnWindowNumberChanged(int value) => UpdateTitle();
+
     [ObservableProperty] private string _statusText = "Open a file or directory to begin";
     [ObservableProperty] private bool _hasImage;
     [ObservableProperty] private bool _canUndo;
@@ -1105,7 +1109,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 : $" ({_currentImageIndex + 1} of {_directoryImages.Count})")
             : "";
         var status = _titleStatus != null ? $" — {_titleStatus}" : "";
-        Title = $"Cedar Image Editor - {name}{fileSize}{modified}{counter}{status}";
+        var prefix = WindowNumber > 0 ? $"({WindowNumber}) " : "";
+        Title = $"{prefix}Cedar Image Editor - {name}{fileSize}{modified}{counter}{status}";
     }
 
     private void UpdateStatusText()

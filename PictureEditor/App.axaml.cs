@@ -6,6 +6,7 @@ using Avalonia.Data.Core.Plugins;
 using Avalonia.Layout;
 using Avalonia.Media;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -26,6 +27,42 @@ public partial class App : Application
     /// Only one window may be in slideshow mode at a time.
     /// </summary>
     public static MainWindowViewModel? ContinuousModeOwner { get; set; }
+
+    // Open MainWindows in the order they were opened. Index 0 == window "1".
+    private static readonly List<MainWindow> _openWindows = new();
+
+    public static void RegisterWindow(MainWindow window)
+    {
+        if (_openWindows.Contains(window)) return;
+        _openWindows.Add(window);
+        RenumberWindows();
+    }
+
+    public static void UnregisterWindow(MainWindow window)
+    {
+        if (_openWindows.Remove(window))
+            RenumberWindows();
+    }
+
+    private static void RenumberWindows()
+    {
+        for (int i = 0; i < _openWindows.Count; i++)
+        {
+            if (_openWindows[i].DataContext is MainWindowViewModel vm)
+                vm.WindowNumber = i + 1;
+        }
+    }
+
+    /// <summary>Brings the Nth open window (1-based) to the front and focuses it.</summary>
+    public static void ActivateWindow(int number)
+    {
+        if (number < 1 || number > _openWindows.Count) return;
+        var w = _openWindows[number - 1];
+        if (w.WindowState == WindowState.Minimized)
+            w.WindowState = WindowState.Normal;
+        w.Activate();
+        w.Focus();
+    }
 
     public override void Initialize()
     {

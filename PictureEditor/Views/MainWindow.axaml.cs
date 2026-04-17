@@ -42,6 +42,10 @@ public partial class MainWindow : Window
 
         // Automatically show the folder picker when the window first opens
         Opened += OnWindowOpened;
+
+        // Track window for numbered hotkeys (1-9) and title-bar prefix.
+        Opened += (_, _) => App.RegisterWindow(this);
+        Closed += (_, _) => App.UnregisterWindow(this);
     }
 
     private async void OnWindowOpened(object? sender, EventArgs e)
@@ -215,9 +219,7 @@ public partial class MainWindow : Window
                 }
                 break;
             case Key.Multiply:
-            case Key.D8:
-                if ((e.Key == Key.Multiply || e.KeyModifiers.HasFlag(KeyModifiers.Shift))
-                    && !inputHasFocus && vm.IsContinuousMode)
+                if (!inputHasFocus && vm.IsContinuousMode)
                 {
                     vm.ToggleShuffleMode();
                     e.Handled = true;
@@ -271,6 +273,42 @@ public partial class MainWindow : Window
                 {
                     vm.ToggleStripModeCommand.Execute(null);
                     e.Handled = true;
+                }
+                break;
+            case Key.D1:
+            case Key.D2:
+            case Key.D3:
+            case Key.D4:
+            case Key.D5:
+            case Key.D6:
+            case Key.D7:
+            case Key.D8:
+            case Key.D9:
+            case Key.NumPad1:
+            case Key.NumPad2:
+            case Key.NumPad3:
+            case Key.NumPad4:
+            case Key.NumPad5:
+            case Key.NumPad6:
+            case Key.NumPad7:
+            case Key.NumPad8:
+            case Key.NumPad9:
+                if (!inputHasFocus)
+                {
+                    // Shift+8 in slideshow toggles shuffle (matches the * key).
+                    if (e.Key == Key.D8 && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && vm.IsContinuousMode)
+                    {
+                        vm.ToggleShuffleMode();
+                        e.Handled = true;
+                    }
+                    else if (e.KeyModifiers == KeyModifiers.None)
+                    {
+                        int n = e.Key >= Key.NumPad1 && e.Key <= Key.NumPad9
+                            ? e.Key - Key.NumPad0
+                            : e.Key - Key.D0;
+                        App.ActivateWindow(n);
+                        e.Handled = true;
+                    }
                 }
                 break;
         }
@@ -351,6 +389,7 @@ public partial class MainWindow : Window
             ($"{mod}+A", "Auto Color"),
             ($"{mod}+J", "Jump To Image"),
             ($"{mod}+W", "Close Window"),
+            ("1 \u2013 9", "Activate Window 1\u20139"),
             ("Left / Right", "Navigate Images"),
             ("Up / Down", "Fine Rotate (in rotate mode)"),
             ("Enter", "Apply Crop / Strip"),
