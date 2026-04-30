@@ -12,7 +12,7 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
-      "program": "${workspaceFolder}/PictureEditor/bin/Debug/net8.0/PictureEditor.dll",
+      "program": "${workspaceFolder}/PictureEditor/bin/Debug/net10.0/PictureEditor.dll",
       "args": [],
       "cwd": "${workspaceFolder}/PictureEditor",
       "console": "internalConsole",
