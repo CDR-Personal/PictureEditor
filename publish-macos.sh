@@ -53,9 +53,9 @@ rm -rf "/Applications/${APP_NAME}.app"
 cp -R "${APP_BUNDLE}" "/Applications/${APP_NAME}.app"
 
 # Copy to ~/Downloads
-echo "=== Copying to ~/Downloads ==="
-rm -rf "${HOME}/Downloads/${APP_NAME}.app"
-cp -R "${APP_BUNDLE}" "${HOME}/Downloads/${APP_NAME}.app"
+#echo "=== Copying to ~/Downloads ==="
+#rm -rf "${HOME}/Downloads/${APP_NAME}.app"
+#cp -R "${APP_BUNDLE}" "${HOME}/Downloads/${APP_NAME}.app"
 
 echo ""
 echo "=== Build complete ==="
