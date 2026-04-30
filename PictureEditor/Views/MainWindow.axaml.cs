@@ -20,6 +20,13 @@ public partial class MainWindow : Window
     private double _preContinuousWidth;
     private double _preContinuousHeight;
 
+    // Move-mode key debounce — guards against sticky-key bursts and accidental key-bounce
+    private DateTime _moveKeyBlockUntil = DateTime.MinValue;
+    private Key _lastMoveKey = Key.None;
+    private int _sameMoveKeyCount;
+    private const int MoveKeyDebounceMs = 100;
+    private const int MoveSameKeyLimit = 20;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -109,6 +116,9 @@ public partial class MainWindow : Window
             vm.SortDialog = ShowSortDialog;
             vm.EnterContinuousView = OnEnterContinuousView;
             vm.ExitContinuousView = OnExitContinuousView;
+            vm.ResolveConflict = ResolveMoveConflict;
+            vm.ShowMessageDialog = ShowInfoDialog;
+            vm.ShowMoveHelpDialog = ShowMoveHelp;
 
             // Subscribe to IsPreviewActive changes for adaptive interpolation quality
             vm.PropertyChanged += OnViewModelPropertyChanged;
@@ -160,6 +170,19 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
+
+        // Tab toggles Edit ↔ Move (bare key only). Blocked during slideshow — Escape out first,
+        // since slideshow + Move-mode would compose into a chrome-less state with auto-advancing
+        // images firing letter-key moves on whatever the loop happens to land on.
+        if (e.Key == Key.Tab && !inputHasFocus && e.KeyModifiers == KeyModifiers.None && !vm.IsContinuousMode)
+        {
+            vm.ToggleMode();
+            e.Handled = true;
+            return;
+        }
+
+        // Move-mode owns most keys when active. If it handles the key, stop here.
+        if (vm.IsMoveMode && HandleMoveModeKey(vm, e, inputHasFocus)) return;
 
         switch (e.Key)
         {
@@ -338,6 +361,115 @@ public partial class MainWindow : Window
         catch (Exception ex) { vm.Title = $"Cedar Image Editor — Error: {ex.Message}"; }
     }
 
+    private bool HandleMoveModeKey(MainWindowViewModel vm, KeyEventArgs e, bool inputHasFocus)
+    {
+        if (inputHasFocus) return false;
+
+        // Hard pause between accepted keys (anti-bounce). Drops the key entirely.
+        if (DateTime.UtcNow < _moveKeyBlockUntil)
+        {
+            e.Handled = true;
+            return true;
+        }
+
+        // Stuck-key guard: same key fired too many times in a row.
+        if (e.Key == _lastMoveKey) _sameMoveKeyCount++;
+        else { _lastMoveKey = e.Key; _sameMoveKeyCount = 1; }
+
+        if (_sameMoveKeyCount > MoveSameKeyLimit)
+        {
+            _sameMoveKeyCount = 0;
+            _moveKeyBlockUntil = DateTime.UtcNow.AddMilliseconds(MoveKeyDebounceMs);
+            e.Handled = true;
+            return true;
+        }
+
+        bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+        bool meta = e.KeyModifiers.HasFlag(KeyModifiers.Meta);
+
+        if (meta)
+        {
+            // Swallow Edit-only Cmd shortcuts so they don't fire the bound commands while
+            // in Move mode. Mode-agnostic shortcuts (Cmd+O, Cmd+W, Cmd+N, Cmd+J, Cmd+digits)
+            // pass through.
+            bool isEditOnly = e.Key switch
+            {
+                Key.S or Key.Z or Key.L or Key.R or Key.A or Key.X => true,
+                Key.C when shift => true,
+                _ => false
+            };
+            if (isEditOnly)
+            {
+                e.Handled = true;
+                return true;
+            }
+            return false;
+        }
+
+        string? label = e.Key switch
+        {
+            Key.A when !ctrl && !shift => "A",
+            Key.T when !ctrl && !shift => "T",
+            Key.E when !ctrl && !shift => "E",
+            Key.Y when !shift => ctrl ? "YC" : "Y",
+            Key.N => shift ? "NT" : ctrl ? "YN" : "N",
+            Key.L => shift ? "LT" : ctrl ? "YL" : "L",
+            Key.D => shift ? "DT" : ctrl ? "YD" : "D",
+            Key.S => shift ? "ST" : ctrl ? "YS" : "S",
+            Key.P => shift ? "PT" : ctrl ? "YP" : "P",
+            Key.U => shift ? "UT" : ctrl ? "YU" : "U",
+            _ => null
+        };
+
+        if (label != null)
+        {
+            _ = vm.MoveByLabel(label);
+            _moveKeyBlockUntil = DateTime.UtcNow.AddMilliseconds(MoveKeyDebounceMs);
+            e.Handled = true;
+            return true;
+        }
+
+        switch (e.Key)
+        {
+            case Key.Escape:
+                _ = vm.UndoLastMove();
+                _moveKeyBlockUntil = DateTime.UtcNow.AddMilliseconds(MoveKeyDebounceMs);
+                e.Handled = true;
+                return true;
+
+            case Key.Space:
+                vm.ToggleDuplicateCheck();
+                e.Handled = true;
+                return true;
+
+            case Key.Z:
+            case Key.Right:
+                HandleNavigateAsync(vm, 1);
+                e.Handled = true;
+                return true;
+
+            case Key.Left:
+                HandleNavigateAsync(vm, -1);
+                e.Handled = true;
+                return true;
+
+            case Key.J when !ctrl && !shift:
+                HandleJumpToAsync(vm);
+                e.Handled = true;
+                return true;
+
+            case Key.F1:
+                _ = ShowMoveHelp();
+                e.Handled = true;
+                return true;
+        }
+
+        // Common keys (Delete/Back, F2, F12, digits, Cmd+J, Cmd+N) fall through to the
+        // shared switch below — same behavior in both modes.
+        return false;
+    }
+
     private async void HandleNavigateAsync(MainWindowViewModel vm, int direction)
     {
         try
@@ -358,6 +490,105 @@ public partial class MainWindow : Window
     private void OnHelpClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         ShowHelpDialog();
+    }
+
+    private void OnMoveHintsClick(object? sender, Avalonia.Input.PointerPressedEventArgs e)
+    {
+        _ = ShowMoveHelp();
+    }
+
+    private async Task ShowMoveHelp()
+    {
+        if (DataContext is not MainWindowViewModel vm) return;
+        var t = vm.MoveTargets;
+
+        string Line(string key, string folder) =>
+            string.IsNullOrEmpty(folder) ? "" : $"\n  {key,-12} {folder}";
+
+        var msg =
+            "Tab toggles between Edit and Move modes.\n\nMove keys (current target folders):\n"
+            + Line("E", t.FolderEdit)
+            + Line("A", t.FolderA)
+            + Line("N", t.FolderN)
+            + Line("D", t.FolderD)
+            + Line("L", t.FolderL)
+            + Line("S", t.FolderS)
+            + Line("P", t.FolderP)
+            + Line("U", t.FolderU)
+            + "\n"
+            + Line("T", t.FolderT)
+            + Line("Shift+N", t.FolderNT)
+            + Line("Shift+D", t.FolderDT)
+            + Line("Shift+L", t.FolderLT)
+            + Line("Shift+S", t.FolderST)
+            + Line("Shift+P", t.FolderPT)
+            + Line("Shift+U", t.FolderUT)
+            + "\n"
+            + Line("Y", t.FolderY)
+            + Line("Ctrl+Y", t.FolderYC)
+            + Line("Ctrl+N", t.FolderYN)
+            + Line("Ctrl+D", t.FolderYD)
+            + Line("Ctrl+L", t.FolderYL)
+            + Line("Ctrl+S", t.FolderYS)
+            + Line("Ctrl+P", t.FolderYP)
+            + Line("Ctrl+U", t.FolderYU)
+            + "\n\nNavigation & file actions:"
+            + "\n  Right / Z    Next image"
+            + "\n  Left         Previous image"
+            + "\n  Space        Toggle duplicate-check"
+            + "\n  Escape       Undo last move"
+            + "\n  Delete/Back  Delete file"
+            + "\n  J            Jump to image #"
+            + "\n  F2           Rename"
+            + "\n  F12          Reload directory";
+
+        var dialog = new Window
+        {
+            Title = "Move-mode Keys",
+            Width = 600,
+            Height = 720,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false
+        };
+
+        var okButton = new Button { Content = "_OK", Width = 80, IsDefault = true };
+        okButton.Click += (_, _) => dialog.Close();
+
+        dialog.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Return || e.Key == Key.Escape || e.Key == Key.F1)
+            {
+                dialog.Close();
+                e.Handled = true;
+            }
+        };
+
+        dialog.Content = new DockPanel
+        {
+            Margin = new Avalonia.Thickness(16),
+            Children =
+            {
+                new StackPanel
+                {
+                    Orientation = Avalonia.Layout.Orientation.Horizontal,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                    Margin = new Avalonia.Thickness(0, 12, 0, 0),
+                    Children = { okButton },
+                    [DockPanel.DockProperty] = Dock.Bottom
+                },
+                new ScrollViewer
+                {
+                    Content = new TextBlock
+                    {
+                        Text = msg,
+                        FontFamily = new Avalonia.Media.FontFamily("Menlo,Consolas,monospace"),
+                        TextWrapping = Avalonia.Media.TextWrapping.NoWrap
+                    }
+                }
+            }
+        };
+
+        await dialog.ShowDialog(this);
     }
 
     private void ShowHelpDialog()
@@ -562,6 +793,83 @@ public partial class MainWindow : Window
 
         await dialog.ShowDialog(this);
         return result;
+    }
+
+    private async Task ShowInfoDialog(string title, string message)
+    {
+        var dialog = new Window
+        {
+            Title = title,
+            Width = 360,
+            Height = 150,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false
+        };
+
+        var okButton = new Button { Content = "_OK", Width = 80, IsDefault = true };
+        okButton.Click += (_, _) => dialog.Close();
+
+        dialog.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Return || e.Key == Key.Escape) { dialog.Close(); e.Handled = true; }
+        };
+
+        dialog.Content = new StackPanel
+        {
+            Margin = new Avalonia.Thickness(20),
+            Spacing = 15,
+            Children =
+            {
+                new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                new StackPanel
+                {
+                    Orientation = Avalonia.Layout.Orientation.Horizontal,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                    Children = { okButton }
+                }
+            }
+        };
+
+        await dialog.ShowDialog(this);
+    }
+
+    private CompareWindow? _activeCompareWindow;
+
+    private async Task<ConflictResolution> ResolveMoveConflict(string sourceFile, string destinationFile)
+    {
+        // Open compare window showing the file already at the destination
+        _activeCompareWindow?.Close();
+        var compare = new CompareWindow();
+        _activeCompareWindow = compare;
+
+        try
+        {
+            compare.ShowImageForCompare(destinationFile);
+            compare.Show(this);
+
+            // Center main + compare as a pair on the primary screen, top-aligned
+            int totalWidth = (int)Width + (int)compare.Width;
+            int screenW = (int)(Screens.Primary?.Bounds.Width ?? 1920);
+            int leftX = Math.Max(0, (screenW - totalWidth) / 2);
+            Position = new PixelPoint(leftX, 0);
+            compare.Position = new PixelPoint(leftX + (int)Width, 0);
+
+            var replace = await ShowConfirmDialog("File exists",
+                $"File already exists: {System.IO.Path.GetFileName(destinationFile)}\n\nReplace existing file?");
+
+            if (replace) return ConflictResolution.Replace;
+
+            var deleteSource = await ShowConfirmDialog("Delete file",
+                $"Delete source file: {System.IO.Path.GetFileName(sourceFile)}?");
+
+            return deleteSource ? ConflictResolution.DeleteSource : ConflictResolution.Cancel;
+        }
+        finally
+        {
+            compare.DisposeImage();
+            compare.Close();
+            if (_activeCompareWindow == compare) _activeCompareWindow = null;
+        }
     }
 
     private async Task<string?> ShowTextInputDialog(string title, string label, string defaultValue)

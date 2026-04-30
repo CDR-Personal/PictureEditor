@@ -1,0 +1,14 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="PictureEditor.Views.CompareWindow"
+        Title="Compare"
+        SystemDecorations="None"
+        Background="Black"
+        CanResize="False"
+        ShowInTaskbar="False">
+
+    <Image x:Name="imgCompare"
+           Stretch="Uniform"
+           HorizontalAlignment="Center"
+           VerticalAlignment="Center" />
+</Window>

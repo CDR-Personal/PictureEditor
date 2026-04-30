@@ -40,7 +40,7 @@
 
     <DockPanel>
         <!-- Menu Bar -->
-        <Menu DockPanel.Dock="Top" IsVisible="{Binding !IsContinuousMode}">
+        <Menu DockPanel.Dock="Top" IsVisible="{Binding IsChromeVisible}">
             <MenuItem Header="_File">
                 <MenuItem Header="_New Window" Click="OnNewWindowClick" InputGesture="Cmd+N"/>
                 <Separator/>
@@ -67,11 +67,34 @@
             </MenuItem>
         </Menu>
 
+        <!-- Move-mode hint strip (replaces chrome when in Move mode) -->
+        <Border DockPanel.Dock="Top" Background="#2d3a4f"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="10,6"
+                IsVisible="{Binding IsMoveMode}"
+                Cursor="Hand"
+                PointerPressed="OnMoveHintsClick"
+                ToolTip.Tip="Click for Move-mode help (F1)">
+            <DockPanel>
+                <TextBlock Text="{Binding DuplicateLabels}"
+                           DockPanel.Dock="Right"
+                           Foreground="#ffd166"
+                           FontWeight="Bold"
+                           VerticalAlignment="Center"
+                           Margin="12,0,0,0"/>
+                <TextBlock Text="{Binding MoveModeHints}"
+                           Foreground="#cfd8e3"
+                           VerticalAlignment="Center"
+                           FontFamily="Menlo,Consolas,monospace"/>
+            </DockPanel>
+        </Border>
+
         <!-- Toolbar (vertical, left side) -->
         <Border DockPanel.Dock="Left" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
                 Padding="4,6" BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
                 BorderThickness="0,0,1,0"
-                IsVisible="{Binding !IsContinuousMode}">
+                IsVisible="{Binding IsChromeVisible}">
             <StackPanel Orientation="Vertical" Spacing="4">
                 <Button Content="Open File" Command="{Binding OpenFileCommand}" ToolTip.Tip="Open image file (Cmd+O)" HorizontalAlignment="Stretch"/>
                 <Button Content="Open Folder" Command="{Binding OpenFolderCommand}" ToolTip.Tip="Open folder (Cmd+Shift+O)" HorizontalAlignment="Stretch"/>
@@ -97,7 +120,7 @@
         <!-- Status Bar -->
         <Border DockPanel.Dock="Bottom" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
                 Padding="8,4"
-                IsVisible="{Binding !IsContinuousMode}">
+                IsVisible="{Binding IsChromeVisible}">
             <DockPanel>
                 <TextBlock Text="{Binding ImageDimensions}" DockPanel.Dock="Right" Margin="8,0"/>
                 <TextBlock Text="{Binding StatusText}"/>
@@ -260,7 +283,7 @@
                             IsHitTestVisible="False"
                             x:Name="NavigationHints">
                     <TextBlock Text="Use Left/Right arrow keys to navigate images" FontSize="12" Foreground="#aaa"
-                               IsVisible="{Binding !IsContinuousMode}"/>
+                               IsVisible="{Binding IsChromeVisible}"/>
                 </StackPanel>
             </Panel>
         </Border>

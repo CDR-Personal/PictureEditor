@@ -7,3 +7,4 @@ obj/
 .DS_Store
 .claude/commands/plan-exit-review.md
 /.claude/skills
+PictureEditor/appsettings.json

@@ -14,9 +14,13 @@ using System.Threading.Tasks;
 
 namespace PictureEditor.ViewModels;
 
+public enum AppMode { Edit, Move }
+public enum ConflictResolution { Replace, DeleteSource, Cancel }
+
 public partial class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private readonly ImageEditorService _editor = new();
+    private readonly FileMoveService _moveService = new();
     private readonly AppSettings _appSettings = AppSettings.Load();
     private string? _currentFilePath;
     private string? _currentDirectory;
@@ -65,7 +69,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _isPreviewActive;
 
     // Continuous/slideshow mode
-    [ObservableProperty] private bool _isContinuousMode;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsChromeVisible))]
+    private bool _isContinuousMode;
 
     // Adjustment slider values
     [ObservableProperty] private double _brightnessValue = 1.0;
@@ -85,6 +91,35 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _stripX;
     [ObservableProperty] private int _stripWidth = 1;
 
+    // Move mode (file-filing workflow ported from ImageMoverMac)
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsEditMode))]
+    [NotifyPropertyChangedFor(nameof(IsMoveMode))]
+    [NotifyPropertyChangedFor(nameof(IsChromeVisible))]
+    private AppMode _mode = AppMode.Edit;
+
+    public bool IsEditMode => Mode == AppMode.Edit;
+    public bool IsMoveMode => Mode == AppMode.Move;
+    public bool IsChromeVisible => IsEditMode && !IsContinuousMode;
+
+    [ObservableProperty] private bool _checkForDuplicates = true;
+    [ObservableProperty] private string _moveModeHints = "Keys = A T Y P U E N S L D ~  |  Tab = Edit  |  F1 = Help";
+    [ObservableProperty] private string _duplicateLabels = "";
+
+    partial void OnModeChanged(AppMode value)
+    {
+        if (value == AppMode.Move)
+        {
+            ExitOtherModes();
+            RunDuplicateCheck();
+        }
+        else
+        {
+            DuplicateLabels = "";
+        }
+        UpdateTitle();
+    }
+
     public string? StartupFilePath { get; set; }
 
     public Func<Task<string?>>? OpenFileDialog { get; set; }
@@ -93,6 +128,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public Func<string, string, Task<bool>>? ConfirmDialog { get; set; }
     public Func<string, string, string, Task<string?>>? TextInputDialog { get; set; }
     public Func<ImageSortOrder, Task<ImageSortOrder?>>? SortDialog { get; set; }
+    public Func<string, string, Task<ConflictResolution>>? ResolveConflict { get; set; }
+    public Func<string, string, Task>? ShowMessageDialog { get; set; }
+    public Func<Task>? ShowMoveHelpDialog { get; set; }
 
     // --- Real-time preview change handlers ---
 
@@ -308,6 +346,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
             RefreshDisplay();
             ReinitializeActiveMode();
+            RunDuplicateCheck();
         }
         catch (Exception ex)
         {
@@ -999,6 +1038,211 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // --- Move mode ---
+
+    private const string MoveStopSentinel = "!   Stop.png";
+
+    public bool CanUndoMove => _moveService.CanUndo;
+    public int MoveUndoCount => _moveService.UndoCount;
+    public MoveTargets MoveTargets => _appSettings.MoveTargets;
+
+    public void ToggleMode()
+    {
+        if (IsContinuousMode) StopContinuousMode();
+        Mode = IsEditMode ? AppMode.Move : AppMode.Edit;
+    }
+
+    public void ToggleDuplicateCheck()
+    {
+        CheckForDuplicates = !CheckForDuplicates;
+        if (CheckForDuplicates) RunDuplicateCheck(announce: false);
+        else DuplicateLabels = "";
+        SetTitleStatus(CheckForDuplicates ? "Duplicate check on" : "Duplicate check off");
+    }
+
+    public Task MoveByLabel(string label)
+    {
+        var t = _appSettings.MoveTargets;
+        var folder = label switch
+        {
+            "A" => t.FolderA,
+            "T" => t.FolderT,
+            "E" => t.FolderEdit,
+            "Y" => t.FolderY,
+            "N" => t.FolderN,
+            "L" => t.FolderL,
+            "D" => t.FolderD,
+            "S" => t.FolderS,
+            "P" => t.FolderP,
+            "U" => t.FolderU,
+            "YC" => t.FolderYC,
+            "YN" => t.FolderYN,
+            "YS" => t.FolderYS,
+            "YL" => t.FolderYL,
+            "YD" => t.FolderYD,
+            "YP" => t.FolderYP,
+            "YU" => t.FolderYU,
+            "LT" => t.FolderLT,
+            "DT" => t.FolderDT,
+            "NT" => t.FolderNT,
+            "ST" => t.FolderST,
+            "PT" => t.FolderPT,
+            "UT" => t.FolderUT,
+            _ => null
+        };
+        if (string.IsNullOrEmpty(folder)) return Task.CompletedTask;
+        return MoveCurrentToFolder(folder);
+    }
+
+    public async Task MoveCurrentToFolder(string targetFolder)
+    {
+        if (string.IsNullOrEmpty(_currentFilePath) || !File.Exists(_currentFilePath)) return;
+
+        var sourceFile = _currentFilePath;
+        var indexBefore = _currentImageIndex;
+
+        var result = _moveService.Move(sourceFile, targetFolder);
+        if (result.Kind == MoveResultKind.InvalidDestination)
+        {
+            SetTitleStatus(result.Message ?? "Invalid destination");
+            return;
+        }
+        if (result.Kind == MoveResultKind.Conflict)
+        {
+            await HandleConflict(sourceFile, targetFolder, result.DestinationFile!, indexBefore);
+            return;
+        }
+        if (result.Kind == MoveResultKind.Error)
+        {
+            SetTitleStatus(result.Message ?? "Move failed");
+            return;
+        }
+
+        await AdvanceAfterMove(sourceFile, indexBefore);
+    }
+
+    private async Task HandleConflict(string sourceFile, string destinationFolder, string destinationFile, int indexBefore)
+    {
+        if (ResolveConflict == null)
+        {
+            SetTitleStatus($"Already exists in {Path.GetFileName(destinationFolder)}");
+            return;
+        }
+
+        var choice = await ResolveConflict(sourceFile, destinationFile);
+        switch (choice)
+        {
+            case ConflictResolution.Replace:
+                var moveResult = _moveService.MoveOverwrite(sourceFile, destinationFolder);
+                if (moveResult.Kind == MoveResultKind.Moved)
+                    await AdvanceAfterMove(sourceFile, indexBefore);
+                else
+                    SetTitleStatus(moveResult.Message ?? "Replace failed");
+                break;
+
+            case ConflictResolution.DeleteSource:
+                try { File.Delete(sourceFile); }
+                catch (Exception ex)
+                {
+                    SetTitleStatus(ex.Message);
+                    return;
+                }
+                await AdvanceAfterMove(sourceFile, indexBefore);
+                break;
+
+            case ConflictResolution.Cancel:
+                break;
+        }
+    }
+
+    public async Task UndoLastMove()
+    {
+        if (!_moveService.CanUndo)
+        {
+            SetTitleStatus("Nothing to undo");
+            return;
+        }
+        var result = _moveService.Undo();
+        if (result.Kind != MoveResultKind.Moved)
+        {
+            var errorTitle = result.Kind == MoveResultKind.InvalidDestination
+                ? "Invalid Destination"
+                : result.Message?.StartsWith("File already exists") == true
+                    ? "File Exists"
+                    : "Error";
+            if (ShowMessageDialog != null)
+                await ShowMessageDialog(errorTitle, result.Message ?? "Undo failed");
+            else
+                SetTitleStatus(result.Message ?? "Undo failed");
+            return;
+        }
+
+        var restored = result.DestinationFile!;
+        var dir = Path.GetDirectoryName(restored);
+        if (dir != null && string.Equals(dir, _currentDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            RefreshDirectoryListing(dir, force: true);
+        }
+        await LoadFile(restored);
+
+        if (ShowMessageDialog != null)
+        {
+            await ShowMessageDialog("Undo Success",
+                $"{Path.GetFileName(restored)} has been restored to the source folder. ({MoveUndoCount} undo remaining)");
+        }
+    }
+
+    public void RunDuplicateCheck(bool announce = true)
+    {
+        if (!CheckForDuplicates || string.IsNullOrEmpty(_currentFilePath))
+        {
+            DuplicateLabels = "";
+            return;
+        }
+        var fileName = Path.GetFileName(_currentFilePath);
+        if (fileName == MoveStopSentinel)
+        {
+            DuplicateLabels = "";
+            return;
+        }
+        DuplicateLabels = FileMoveService.CheckDuplicates(
+            fileName, _currentDirectory ?? "", _appSettings.MoveTargets).TrimEnd();
+
+        // Pop a modal alert when duplicates exist (matches original Mover behavior). Only on
+        // organic entry points — mode toggle and file load — not when the user re-enables the
+        // check via Space, since that would announce something they already know about.
+        if (announce && IsMoveMode && !string.IsNullOrEmpty(DuplicateLabels) && ShowMessageDialog != null)
+        {
+            _ = ShowMessageDialog("Duplicate Found", $"File already exists in: {DuplicateLabels}");
+        }
+    }
+
+    private async Task AdvanceAfterMove(string movedFile, int indexBefore)
+    {
+        // Drop the moved file from the in-memory listing so we can navigate to a neighbour.
+        if (_currentDirectory != null)
+        {
+            var idx = _directoryImages.IndexOf(movedFile);
+            if (idx >= 0) _directoryImages.RemoveAt(idx);
+        }
+
+        if (_directoryImages.Count == 0)
+        {
+            _currentFilePath = null;
+            _currentImageIndex = -1;
+            HasImage = false;
+            DisplayImage = null;
+            DuplicateLabels = "";
+            UpdateTitle();
+            UpdateStatusText();
+            return;
+        }
+
+        var nextIndex = Math.Min(indexBefore, _directoryImages.Count - 1);
+        _currentImageIndex = nextIndex;
+        await LoadFile(_directoryImages[nextIndex]);
+    }
+
     // --- Helpers ---
 
     private void ExitOtherModes()
@@ -1109,8 +1353,9 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                 : $" ({_currentImageIndex + 1} of {_directoryImages.Count})")
             : "";
         var status = _titleStatus != null ? $" — {_titleStatus}" : "";
-        var prefix = WindowNumber > 0 ? $"({WindowNumber}) " : "";
-        Title = $"{prefix}Cedar Image Editor - {name}{fileSize}{modified}{counter}{status}";
+        var winNum = WindowNumber > 0 ? $"({WindowNumber}) " : "";
+        var modePrefix = IsMoveMode ? "[MOVE] " : "";
+        Title = $"{winNum}{modePrefix}Cedar Image Editor - {name}{fileSize}{modified}{counter}{status}";
     }
 
     private void UpdateStatusText()
