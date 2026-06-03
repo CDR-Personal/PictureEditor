@@ -414,7 +414,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     // --- Edit operations ---
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(IsEditMode))]
     private void RotateLeft()
     {
         CommitPendingPreview();
@@ -425,7 +425,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ReinitializeActiveMode();
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(IsEditMode))]
     private void RotateRight()
     {
         CommitPendingPreview();
@@ -436,7 +436,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ReinitializeActiveMode();
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(IsEditMode))]
     private void AutoColor()
     {
         CommitPendingPreview();
@@ -446,7 +446,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ReinitializeActiveMode();
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(IsEditMode))]
     private void Undo()
     {
         // Discard any pending preview first
@@ -474,7 +474,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     // --- Crop mode ---
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(IsEditMode))]
     private void ToggleCropMode()
     {
         if (IsCropMode)
@@ -523,7 +523,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     // --- Strip removal mode ---
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(IsEditMode))]
     private void ToggleStripMode()
     {
         if (IsStripMode)
@@ -687,7 +687,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     // --- Save ---
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(IsEditMode))]
     private async Task Save()
     {
         if (_currentFilePath == null || !_editor.HasImage) return;
@@ -711,7 +711,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ReEnterPreviewMode(wasAdjustMode, wasResizeMode, wasRotateMode);
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(IsEditMode))]
     private async Task SaveAs()
     {
         if (!_editor.HasImage) return;
