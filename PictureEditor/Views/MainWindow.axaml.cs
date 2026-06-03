@@ -597,7 +597,7 @@ public partial class MainWindow : Window
         {
             Title = "Keyboard Shortcuts",
             Width = 420,
-            Height = 700,
+            Height = 710,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false
         };
@@ -631,6 +631,7 @@ public partial class MainWindow : Window
             ("F2", "Rename Current File"),
             ("F12", "Reload Current Folder"),
             ("Delete", "Delete Current File"),
+            ("Tab","Toggle edit/mpve mode")
         };
 
         var list = new StackPanel { Spacing = 4 };
