@@ -699,9 +699,30 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            _editor.SaveImage(_currentFilePath);
-            _hasUnsavedChanges = false;
-            SetTitleStatus("Saved");
+            // WEBP is treated as a view-only format here: re-encode to JPG on save and
+            // drop the original .webp so the folder ends up with a single JPG file.
+            if (Path.GetExtension(_currentFilePath).Equals(".webp", StringComparison.OrdinalIgnoreCase))
+            {
+                var jpgPath = GetAvailableJpgPath(_currentFilePath);
+                _editor.SaveImage(jpgPath);
+
+                var oldWebp = _currentFilePath;
+                _currentFilePath = jpgPath;
+                if (_currentImageIndex >= 0 && _currentImageIndex < _directoryImages.Count)
+                    _directoryImages[_currentImageIndex] = jpgPath;
+
+                // Best-effort: the JPG is already written, so a failed delete is non-fatal.
+                try { File.Delete(oldWebp); } catch { /* leave the orphan rather than fail the save */ }
+
+                _hasUnsavedChanges = false;
+                SetTitleStatus($"Converted to {Path.GetFileName(jpgPath)}");
+            }
+            else
+            {
+                _editor.SaveImage(_currentFilePath);
+                _hasUnsavedChanges = false;
+                SetTitleStatus("Saved");
+            }
         }
         catch (Exception ex)
         {
@@ -709,6 +730,19 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         ReEnterPreviewMode(wasAdjustMode, wasResizeMode, wasRotateMode);
+    }
+
+    // Returns "<name>.jpg" next to the source, appending " (n)" if a different file
+    // already claims that name, so converting WEBP never clobbers an unrelated image.
+    private static string GetAvailableJpgPath(string sourcePath)
+    {
+        var dir = Path.GetDirectoryName(sourcePath)!;
+        var baseName = Path.GetFileNameWithoutExtension(sourcePath);
+        var candidate = Path.Combine(dir, baseName + ".jpg");
+        int n = 1;
+        while (File.Exists(candidate))
+            candidate = Path.Combine(dir, $"{baseName} ({n++}).jpg");
+        return candidate;
     }
 
     [RelayCommand(CanExecute = nameof(IsEditMode))]
