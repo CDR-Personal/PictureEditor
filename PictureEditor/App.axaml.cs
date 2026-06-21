@@ -123,20 +123,35 @@ public partial class App : Application
     private async void OnShutdownRequested(object? sender, ShutdownRequestedEventArgs e)
     {
         if (ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop) return;
+        if (_shutdownConfirmed) return;
 
-        var openWindows = desktop.Windows.OfType<MainWindow>().Count();
-        if (openWindows <= 1 || _shutdownConfirmed) return;
+        var mainWindows = desktop.Windows.OfType<MainWindow>().ToList();
+        var unsavedCount = mainWindows.Count(
+            w => w.DataContext is MainWindowViewModel vm && vm.HasUnsavedChanges);
+
+        // A single window with no unsaved edits quits silently — nothing to warn about.
+        if (mainWindows.Count <= 1 && unsavedCount == 0) return;
 
         e.Cancel = true;
 
-        var owner = desktop.Windows.OfType<MainWindow>().FirstOrDefault(w => w.IsActive)
-                    ?? desktop.Windows.OfType<MainWindow>().First();
+        var owner = mainWindows.FirstOrDefault(w => w.IsActive) ?? mainWindows.First();
 
-        var confirmed = await ShowConfirmDialog(owner, "Quit Cedar Image Editor",
-            $"There are {openWindows} windows open. Quit the application?");
+        // Unsaved edits take priority over the multi-window notice.
+        string message = unsavedCount switch
+        {
+            1 => "You have unsaved changes. Quit without saving?",
+            > 1 => $"{unsavedCount} windows have unsaved changes. Quit without saving?",
+            _ => $"There are {mainWindows.Count} windows open. Quit the application?"
+        };
+
+        var confirmed = await ShowConfirmDialog(owner, "Quit Cedar Image Editor", message);
 
         if (confirmed)
         {
+            // Confirmation handled centrally — keep each window from prompting again
+            // as Shutdown() closes them one by one.
+            foreach (var w in mainWindows)
+                w.SuppressCloseConfirmation();
             _shutdownConfirmed = true;
             desktop.Shutdown();
         }

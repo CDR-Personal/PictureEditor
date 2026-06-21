@@ -27,6 +27,12 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private List<string> _directoryImages = new();
     private int _currentImageIndex = -1;
     private bool _hasUnsavedChanges;
+
+    /// <summary>
+    /// True when the current image has undoable edits that have not been saved.
+    /// Mirrors the guard used when navigating away from an edited image.
+    /// </summary>
+    public bool HasUnsavedChanges => _hasUnsavedChanges && _editor.CanUndo;
     private ImageSortOrder _sortOrder = ImageSortOrder.NameAsc;
     private bool _includeSubdirectories;
     private string? _titleStatus;

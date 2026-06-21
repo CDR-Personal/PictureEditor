@@ -84,8 +84,36 @@ public partial class MainWindow : Window
         }
     }
 
-    protected override void OnClosing(WindowClosingEventArgs e)
+    // Set once the user has confirmed closing with unsaved edits, so the
+    // programmatic Close() that follows the dialog isn't intercepted again.
+    private bool _forceClose;
+
+    /// <summary>
+    /// Suppresses this window's unsaved-changes prompt on its next close.
+    /// Used during an app-wide quit (Cmd+Q), where confirmation has already
+    /// been handled centrally in <see cref="App.OnShutdownRequested"/>.
+    /// </summary>
+    internal void SuppressCloseConfirmation() => _forceClose = true;
+
+    protected override async void OnClosing(WindowClosingEventArgs e)
     {
+        // Guard against losing unsaved edits. OnClosing is synchronous, so we
+        // cancel this pass, await the confirmation dialog, then re-issue Close()
+        // if the user chooses to discard.
+        if (!_forceClose && DataContext is MainWindowViewModel vm && vm.HasUnsavedChanges)
+        {
+            e.Cancel = true;
+            var discard = await ShowConfirmDialog(
+                "Unsaved Changes",
+                "You have unsaved changes. Close without saving?");
+            if (discard)
+            {
+                _forceClose = true;
+                Close();
+            }
+            return;
+        }
+
         base.OnClosing(e);
 
         _settings.IsMaximized = WindowState == WindowState.Maximized;
