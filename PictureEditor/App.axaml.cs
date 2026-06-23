@@ -90,7 +90,8 @@ public partial class App : Application
             // Register macOS Apple Event handler for "Open With" from Finder
             MacOSFileOpen.Register(filePath =>
             {
-                CreateNewWindow(filePath);
+                var active = desktop.Windows.FirstOrDefault(w => w.IsActive);
+                CreateNewWindow(filePath, active);
             });
 
             var vm = new MainWindowViewModel();
@@ -107,7 +108,7 @@ public partial class App : Application
     /// <summary>
     /// Creates a new editor window, optionally loading the given file or directory.
     /// </summary>
-    public static MainWindow CreateNewWindow(string? filePath = null)
+    public static MainWindow CreateNewWindow(string? filePath = null, Window? sourceWindow = null)
     {
         var vm = new MainWindowViewModel();
         if (filePath != null)
@@ -115,7 +116,28 @@ public partial class App : Application
 
         var window = new MainWindow { DataContext = vm };
         window.Show();
+
+        if (sourceWindow != null)
+            PositionNearWindow(window, sourceWindow);
+
         return window;
+    }
+
+    private static void PositionNearWindow(Window newWindow, Window source)
+    {
+        const int cascadeOffset = 30;
+        var screen = source.Screens.ScreenFromWindow(source);
+        if (screen == null) return;
+
+        var work = screen.WorkingArea;
+        var scale = screen.Scaling;
+        var physW = (int)(newWindow.ClientSize.Width * scale);
+        var physH = (int)(newWindow.ClientSize.Height * scale);
+
+        int x = Math.Max(work.X, Math.Min(source.Position.X + cascadeOffset, work.Right - physW));
+        int y = Math.Max(work.Y, Math.Min(source.Position.Y + cascadeOffset, work.Bottom - physH));
+
+        newWindow.Position = new PixelPoint(x, y);
     }
 
     private bool _shutdownConfirmed;

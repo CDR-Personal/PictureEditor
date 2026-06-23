@@ -308,7 +308,7 @@ public partial class MainWindow : Window
             case Key.N:
                 if (e.KeyModifiers is KeyModifiers.Meta or KeyModifiers.Control)
                 {
-                    App.CreateNewWindow();
+                    App.CreateNewWindow(sourceWindow: this);
                     e.Handled = true;
                 }
                 break;
@@ -512,7 +512,7 @@ public partial class MainWindow : Window
 
     private void OnNewWindowClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        App.CreateNewWindow();
+        App.CreateNewWindow(sourceWindow: this);
     }
 
     private void OnHelpClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
