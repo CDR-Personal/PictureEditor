@@ -301,6 +301,16 @@ public partial class MainWindow : Window
                 ShowHelpDialog();
                 e.Handled = true;
                 break;
+            case Key.F5:
+                // Single-image move: F5 from Edit enters one-shot filing; F5 again cancels it.
+                // No-op in full Move mode (single-move is only reachable from Edit).
+                if (!inputHasFocus && e.KeyModifiers == KeyModifiers.None)
+                {
+                    if (vm.IsEditMode) vm.EnterSingleMoveMode();
+                    else if (vm.IsSingleMoveMode) vm.ExitSingleMoveMode();
+                    e.Handled = true;
+                }
+                break;
             case Key.F12:
                 HandleReloadAsync(vm);
                 e.Handled = true;
@@ -425,6 +435,8 @@ public partial class MainWindow : Window
             {
                 Key.S or Key.Z or Key.L or Key.R or Key.A or Key.X => true,
                 Key.C when shift => true,
+                // Cmd+J jumps to another image — navigation, blocked while filing one image.
+                Key.J when vm.IsSingleMoveMode => true,
                 _ => false
             };
             if (isEditOnly)
@@ -473,17 +485,18 @@ public partial class MainWindow : Window
 
             case Key.Z:
             case Key.Right:
-                HandleNavigateAsync(vm, 1);
+                // Single-move locks onto the current image — swallow navigation but don't move.
+                if (!vm.IsSingleMoveMode) HandleNavigateAsync(vm, 1);
                 e.Handled = true;
                 return true;
 
             case Key.Left:
-                HandleNavigateAsync(vm, -1);
+                if (!vm.IsSingleMoveMode) HandleNavigateAsync(vm, -1);
                 e.Handled = true;
                 return true;
 
             case Key.J when !ctrl && !shift:
-                HandleJumpToAsync(vm);
+                if (!vm.IsSingleMoveMode) HandleJumpToAsync(vm);
                 e.Handled = true;
                 return true;
 
@@ -659,7 +672,8 @@ public partial class MainWindow : Window
             ("F2", "Rename Current File"),
             ("F12", "Reload Current Folder"),
             ("Delete", "Delete Current File"),
-            ("Tab","Toggle edit/mpve mode")
+            ("Tab", "Toggle Edit/Move mode"),
+            ("F5", "Move single image (then back to Edit)")
         };
 
         var list = new StackPanel { Spacing = 4 };

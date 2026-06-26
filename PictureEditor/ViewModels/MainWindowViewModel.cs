@@ -15,6 +15,10 @@ using System.Threading.Tasks;
 namespace PictureEditor.ViewModels;
 
 public enum AppMode { Edit, Move }
+
+// The active Edit sub-function, remembered across a single-image move so it can be re-armed
+// when the app drops back into Edit on the next image.
+public enum EditFunction { None, Crop, Strip, Resize, Adjust, Rotate }
 public enum ConflictResolution { Replace, DeleteSource, Cancel }
 
 public partial class MainWindowViewModel : ViewModelBase, IDisposable
@@ -109,18 +113,53 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsChromeVisible => IsEditMode && !IsContinuousMode;
 
     [ObservableProperty] private bool _checkForDuplicates = true;
-    [ObservableProperty] private string _moveModeHints = "Keys = A T Y P U E N S L D ~  |  Tab = Edit  |  F1 = Help";
+    [ObservableProperty] private string _moveModeHints = FullMoveHints;
     [ObservableProperty] private string _duplicateLabels = "";
+
+    // One-shot filing: entered from Edit via F5, files a single image, then returns to Edit.
+    // Reuses AppMode.Move (so the hint strip, [MOVE] chrome and key routing all apply); this
+    // flag just records that we should bounce back after the next successful move.
+    [ObservableProperty] private bool _isSingleMoveMode;
+
+    // Edit sub-function active when single-move was entered; re-armed after the move.
+    private EditFunction _singleMoveReturnFunction = EditFunction.None;
+
+    private EditFunction CurrentEditFunction =>
+        IsCropMode ? EditFunction.Crop
+        : IsStripMode ? EditFunction.Strip
+        : IsResizeMode ? EditFunction.Resize
+        : IsAdjustMode ? EditFunction.Adjust
+        : IsRotateMode ? EditFunction.Rotate
+        : EditFunction.None;
+
+    private void RestoreEditFunction(EditFunction fn)
+    {
+        if (!HasImage) return;
+        switch (fn)
+        {
+            case EditFunction.Crop: ToggleCropMode(); break;
+            case EditFunction.Strip: ToggleStripMode(); break;
+            case EditFunction.Resize: ToggleResizeMode(); break;
+            case EditFunction.Adjust: ToggleAdjustMode(); break;
+            case EditFunction.Rotate: ToggleRotateMode(); break;
+        }
+    }
+
+    private const string FullMoveHints = "Keys = A T Y P U E N S L D ~  |  Tab = Edit  |  F1 = Help";
+    private const string SingleMoveHints = "Move ONE image: A T Y P U E N S L D ~  |  F5 = Cancel  |  Esc = Undo  |  F1 = Help";
 
     partial void OnModeChanged(AppMode value)
     {
         if (value == AppMode.Move)
         {
             ExitOtherModes();
+            MoveModeHints = IsSingleMoveMode ? SingleMoveHints : FullMoveHints;
             RunDuplicateCheck();
         }
         else
         {
+            IsSingleMoveMode = false;
+            MoveModeHints = FullMoveHints;
             DuplicateLabels = "";
         }
         UpdateTitle();
@@ -1092,6 +1131,35 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         Mode = IsEditMode ? AppMode.Move : AppMode.Edit;
     }
 
+    // F5 from Edit mode: file just the current image, then drop back to Edit. No-op unless we are
+    // in Edit mode with an image (per requirement: single-move is only reachable from Edit).
+    // Blocked when there are unsaved edits — moving the file would discard them.
+    public void EnterSingleMoveMode()
+    {
+        if (!IsEditMode || !HasImage || IsContinuousMode) return;
+        if (HasUnsavedChanges)
+        {
+            SetTitleStatus("Save or undo edits before moving");
+            return;
+        }
+        // Remember the active Edit function so it can be re-armed on the next image, and discard
+        // any unapplied crop/preview (rather than letting the mode switch silently apply it).
+        _singleMoveReturnFunction = CurrentEditFunction;
+        CancelCurrentMode();
+        IsSingleMoveMode = true;
+        Mode = AppMode.Move;
+    }
+
+    // F5 again while filing: cancel without moving anything and revert to Edit, restoring the
+    // Edit function that was active on entry.
+    public void ExitSingleMoveMode()
+    {
+        if (!IsSingleMoveMode) return;
+        var fn = _singleMoveReturnFunction;
+        Mode = AppMode.Edit; // OnModeChanged clears IsSingleMoveMode
+        RestoreEditFunction(fn);
+    }
+
     public void ToggleDuplicateCheck()
     {
         CheckForDuplicates = !CheckForDuplicates;
@@ -1273,6 +1341,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             HasImage = false;
             DisplayImage = null;
             DuplicateLabels = "";
+            if (IsSingleMoveMode) Mode = AppMode.Edit;
             UpdateTitle();
             UpdateStatusText();
             return;
@@ -1280,7 +1349,11 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         var nextIndex = Math.Min(indexBefore, _directoryImages.Count - 1);
         _currentImageIndex = nextIndex;
+        // Capture before the mode flip clears IsSingleMoveMode; re-arm after the next image loads.
+        var returnFn = IsSingleMoveMode ? _singleMoveReturnFunction : EditFunction.None;
+        if (IsSingleMoveMode) Mode = AppMode.Edit; // back to Edit on the next neighbour
         await LoadFile(_directoryImages[nextIndex]);
+        RestoreEditFunction(returnFn);
     }
 
     // --- Helpers ---
@@ -1394,7 +1467,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             : "";
         var status = _titleStatus != null ? $" — {_titleStatus}" : "";
         var winNum = WindowNumber > 0 ? $"({WindowNumber}) " : "";
-        var modePrefix = IsMoveMode ? "[MOVE] " : "";
+        var modePrefix = IsMoveMode ? (IsSingleMoveMode ? "[MOVE 1] " : "[MOVE] ") : "";
         Title = $"{winNum}{modePrefix}Cedar Image Editor - {name}{fileSize}{modified}{counter}{status}";
     }
 
