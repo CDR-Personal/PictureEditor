@@ -673,7 +673,8 @@ public partial class MainWindow : Window
             ("F12", "Reload Current Folder"),
             ("Delete", "Delete Current File"),
             ("Tab", "Toggle Edit/Move mode"),
-            ("F5", "Move single image (then back to Edit)")
+            ("F5", "Move single image"),
+            ("", " (then back to Edit)")
         };
 
         var list = new StackPanel { Spacing = 4 };
@@ -703,7 +704,7 @@ public partial class MainWindow : Window
         {
             Content = "Close",
             Width = 80,
-            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right
         };
         closeButton.Click += (_, _) => dialog.Close();
 
@@ -732,7 +733,7 @@ public partial class MainWindow : Window
                 new ScrollViewer
                 {
                     Content = list,
-                    MaxHeight = 520
+                    MaxHeight = 570
                 },
                 closeButton
             }
