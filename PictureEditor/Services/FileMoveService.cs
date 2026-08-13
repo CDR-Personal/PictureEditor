@@ -114,6 +114,67 @@ public class FileMoveService
     }
 
     /// <summary>
+    /// The configured move targets paired with their single-key labels, in duplicate-check
+    /// display order. <c>"E"</c> (the edit folder) sorts last and is skipped by
+    /// <see cref="CheckDuplicates"/> — it's a write-target, not a library folder.
+    /// </summary>
+    public static (string Label, string Folder)[] LabeledTargets(MoveTargets t) => new[]
+    {
+        ("A", t.FolderA),
+        ("D", t.FolderD),
+        ("L", t.FolderL),
+        ("N", t.FolderN),
+        ("P", t.FolderP),
+        ("S", t.FolderS),
+        ("T", t.FolderT),
+        ("U", t.FolderU),
+        ("Y", t.FolderY),
+        ("YC", t.FolderYC),
+        ("YN", t.FolderYN),
+        ("YS", t.FolderYS),
+        ("YL", t.FolderYL),
+        ("YD", t.FolderYD),
+        ("YP", t.FolderYP),
+        ("YU", t.FolderYU),
+        ("LT", t.FolderLT),
+        ("DT", t.FolderDT),
+        ("NT", t.FolderNT),
+        ("ST", t.FolderST),
+        ("PT", t.FolderPT),
+        ("UT", t.FolderUT),
+        ("E", t.FolderEdit),
+    };
+
+    /// <summary>
+    /// Returns the configured folder for a move-target label, or <c>null</c> when the label is
+    /// unknown or that target has not been configured.
+    /// </summary>
+    public static string? FolderForLabel(string label, MoveTargets targets)
+    {
+        foreach (var (candidate, folder) in LabeledTargets(targets))
+            if (candidate == label)
+                return string.IsNullOrEmpty(folder) ? null : folder;
+        return null;
+    }
+
+    /// <summary>
+    /// Reverse of <see cref="FolderForLabel"/>: returns the move-target label for
+    /// <paramref name="directory"/> (e.g. <c>"NT"</c>), or <c>null</c> when the directory is not
+    /// one of the configured targets. When several labels share a folder, the first in
+    /// <see cref="LabeledTargets"/> order wins.
+    /// </summary>
+    public static string? LabelForDirectory(string? directory, MoveTargets targets)
+    {
+        if (string.IsNullOrEmpty(directory)) return null;
+        var normalized = Normalize(directory);
+        foreach (var (label, folder) in LabeledTargets(targets))
+            if (!string.IsNullOrEmpty(folder) &&
+                Normalize(folder).Equals(normalized, StringComparison.OrdinalIgnoreCase))
+                return label;
+        return null;
+    }
+
+    /// <summary>
     /// Returns a concatenated key string (e.g. <c>"A D N "</c>) listing the categorized
     /// move-target folders — other than <paramref name="currentDirectory"/> — that already
     /// contain a file with the given name. <c>FolderEdit</c> is intentionally excluded
@@ -122,37 +183,29 @@ public class FileMoveService
     public static string CheckDuplicates(string fileName, string currentDirectory, MoveTargets targets)
     {
         var result = new StringBuilder();
-        Check("A", targets.FolderA);
-        Check("D", targets.FolderD);
-        Check("L", targets.FolderL);
-        Check("N", targets.FolderN);
-        Check("P", targets.FolderP);
-        Check("S", targets.FolderS);
-        Check("T", targets.FolderT);
-        Check("U", targets.FolderU);
-        Check("Y", targets.FolderY);
-        Check("YC", targets.FolderYC);
-        Check("YN", targets.FolderYN);
-        Check("YS", targets.FolderYS);
-        Check("YL", targets.FolderYL);
-        Check("YD", targets.FolderYD);
-        Check("YP", targets.FolderYP);
-        Check("YU", targets.FolderYU);
-        Check("LT", targets.FolderLT);
-        Check("DT", targets.FolderDT);
-        Check("NT", targets.FolderNT);
-        Check("ST", targets.FolderST);
-        Check("PT", targets.FolderPT);
-        Check("UT", targets.FolderUT);
-        return result.ToString();
+        var current = Normalize(currentDirectory);
 
-        void Check(string label, string folder)
+        foreach (var (label, folder) in LabeledTargets(targets))
         {
-            if (string.IsNullOrEmpty(folder)) return;
-            if (folder.Equals(currentDirectory, StringComparison.OrdinalIgnoreCase)) return;
+            if (label == "E" || string.IsNullOrEmpty(folder)) continue;
+            if (Normalize(folder).Equals(current, StringComparison.OrdinalIgnoreCase)) continue;
             if (File.Exists(Path.Combine(folder, fileName)))
                 result.Append(label).Append(' ');
         }
+
+        return result.ToString();
+    }
+
+    /// <summary>
+    /// Canonicalizes a directory path so configured targets and the current directory compare
+    /// equal despite trailing separators or relative segments.
+    /// </summary>
+    private static string Normalize(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return "";
+        try { path = Path.GetFullPath(path); }
+        catch { /* malformed path — fall back to the raw string */ }
+        return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
 
     private void PushUndo(string source, string destination)

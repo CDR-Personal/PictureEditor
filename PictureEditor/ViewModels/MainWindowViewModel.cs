@@ -1170,34 +1170,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public Task MoveByLabel(string label)
     {
-        var t = _appSettings.MoveTargets;
-        var folder = label switch
-        {
-            "A" => t.FolderA,
-            "T" => t.FolderT,
-            "E" => t.FolderEdit,
-            "Y" => t.FolderY,
-            "N" => t.FolderN,
-            "L" => t.FolderL,
-            "D" => t.FolderD,
-            "S" => t.FolderS,
-            "P" => t.FolderP,
-            "U" => t.FolderU,
-            "YC" => t.FolderYC,
-            "YN" => t.FolderYN,
-            "YS" => t.FolderYS,
-            "YL" => t.FolderYL,
-            "YD" => t.FolderYD,
-            "YP" => t.FolderYP,
-            "YU" => t.FolderYU,
-            "LT" => t.FolderLT,
-            "DT" => t.FolderDT,
-            "NT" => t.FolderNT,
-            "ST" => t.FolderST,
-            "PT" => t.FolderPT,
-            "UT" => t.FolderUT,
-            _ => null
-        };
+        var folder = FileMoveService.FolderForLabel(label, _appSettings.MoveTargets);
         if (string.IsNullOrEmpty(folder)) return Task.CompletedTask;
         return MoveCurrentToFolder(folder);
     }
@@ -1460,26 +1433,38 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             };
         }
         var modified = _hasUnsavedChanges ? " *" : "";
-        var counter = _directoryImages.Count > 0 && _currentImageIndex >= 0
-            ? (_isShuffleMode && _shuffledOrder != null
-                ? $" ({_shufflePosition + 1} of {_shuffledOrder.Count} shuffled)"
-                : $" ({_currentImageIndex + 1} of {_directoryImages.Count})")
-            : "";
+        var counter = BuildCounter();
         var status = _titleStatus != null ? $" — {_titleStatus}" : "";
         var winNum = WindowNumber > 0 ? $"({WindowNumber}) " : "";
         var modePrefix = IsMoveMode ? (IsSingleMoveMode ? "[MOVE 1] " : "[MOVE] ") : "";
         Title = $"{winNum}{modePrefix}Cedar Image Editor - {name}{fileSize}{modified}{counter}{status}";
     }
 
+    /// <summary>
+    /// Builds the " (3 of 1999, NT)" position indicator shared by the window title and the status
+    /// bar. The trailing key is the move-target label of the directory holding the current image
+    /// (omitted when that directory isn't a configured target).
+    /// </summary>
+    private string BuildCounter()
+    {
+        if (_directoryImages.Count == 0 || _currentImageIndex < 0) return "";
+
+        var directory = _currentFilePath != null
+            ? Path.GetDirectoryName(_currentFilePath)
+            : _currentDirectory;
+        var label = FileMoveService.LabelForDirectory(directory, _appSettings.MoveTargets);
+        var suffix = label != null ? $", {label}" : "";
+
+        return _isShuffleMode && _shuffledOrder != null
+            ? $" ({_shufflePosition + 1} of {_shuffledOrder.Count} shuffled{suffix})"
+            : $" ({_currentImageIndex + 1} of {_directoryImages.Count}{suffix})";
+    }
+
     private void UpdateStatusText()
     {
         if (_currentFilePath == null) return;
         var name = Path.GetFileName(_currentFilePath);
-        var counter = _directoryImages.Count > 0 && _currentImageIndex >= 0
-            ? (_isShuffleMode && _shuffledOrder != null
-                ? $" ({_shufflePosition + 1} of {_shuffledOrder.Count} shuffled)"
-                : $" ({_currentImageIndex + 1} of {_directoryImages.Count})")
-            : "";
+        var counter = BuildCounter();
         var status = _titleStatus != null ? $" — {_titleStatus}" : "";
         StatusText = $"{name}{counter} | {ImagePixelWidthValue}x{ImagePixelHeightValue}{status}";
     }
