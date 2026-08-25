@@ -167,6 +167,53 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string? StartupFilePath { get; set; }
 
+    /// <summary>
+    /// A saved session for this window, applied once when the window first opens.
+    /// Richer than <see cref="StartupFilePath"/>: it carries the directory listing
+    /// settings as well as the image to show.
+    /// </summary>
+    public WindowLayout? RestoreState { get; set; }
+
+    /// <summary>
+    /// Records the directory, listing options and current image into <paramref name="layout"/>
+    /// so the window's session can be rebuilt on the next launch.
+    /// </summary>
+    public void CaptureSessionState(WindowLayout layout)
+    {
+        layout.Directory = _currentDirectory;
+        layout.IncludeSubdirectories = _includeSubdirectories;
+        layout.SortOrder = _sortOrder;
+        layout.CurrentFile = _currentFilePath;
+        layout.CurrentIndex = _currentImageIndex;
+    }
+
+    /// <summary>
+    /// Reopens a saved session. Returns false when there is nothing to show, so the
+    /// caller can fall back to the folder picker.
+    /// </summary>
+    public async Task<bool> RestoreSession(WindowLayout state)
+    {
+        if (state.Directory == null || !Directory.Exists(state.Directory)) return false;
+
+        _sortOrder = state.SortOrder;
+        _includeSubdirectories = state.IncludeSubdirectories;
+        _currentDirectory = state.Directory;
+        _directoryImages = ImageEditorService.GetImagesInDirectory(
+            state.Directory, _sortOrder, _includeSubdirectories);
+
+        if (_directoryImages.Count == 0) return false;
+
+        // Prefer the exact image that was on screen; fall back to its old position
+        // in the listing if that file has since been moved or renamed.
+        var index = state.CurrentFile != null ? _directoryImages.IndexOf(state.CurrentFile) : -1;
+        if (index < 0)
+            index = Math.Clamp(state.CurrentIndex, 0, _directoryImages.Count - 1);
+
+        _currentImageIndex = index;
+        await LoadFile(_directoryImages[index]);
+        return true;
+    }
+
     public Func<Task<string?>>? OpenFileDialog { get; set; }
     public Func<Task<string?>>? OpenFolderDialog { get; set; }
     public Func<string, string?, Task<string?>>? SaveFileDialog { get; set; }

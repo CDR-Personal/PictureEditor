@@ -60,12 +60,22 @@ public partial class MainWindow : Window
         Opened -= OnWindowOpened; // only once
         if (DataContext is not MainWindowViewModel vm) return;
 
+        var restore = vm.RestoreState;
+        vm.RestoreState = null;
+
         // Yield to the event loop so macOS Apple Events (from "Open With")
         // have a chance to be delivered before we decide to show the folder dialog
-        if (vm.StartupFilePath == null)
+        if (vm.StartupFilePath == null && restore == null)
             await Task.Delay(150);
 
-        if (vm.StartupFilePath != null)
+        if (restore != null)
+        {
+            // A saved session that no longer resolves falls through to the picker,
+            // the same as a plain launch.
+            if (!await vm.RestoreSession(restore))
+                await vm.OpenFolderCommand.ExecuteAsync(null);
+        }
+        else if (vm.StartupFilePath != null)
         {
             var path = vm.StartupFilePath;
             vm.StartupFilePath = null;
@@ -93,7 +103,15 @@ public partial class MainWindow : Window
     /// Used during an app-wide quit (Cmd+Q), where confirmation has already
     /// been handled centrally in <see cref="App.OnShutdownRequested"/>.
     /// </summary>
-    internal void SuppressCloseConfirmation() => _forceClose = true;
+    internal void SuppressCloseConfirmation()
+    {
+        _forceClose = true;
+        _layoutHandled = true;
+    }
+
+    // Set once the "Save current layout?" question has been answered for this quit,
+    // either here or centrally in App.OnShutdownRequested.
+    private bool _layoutHandled;
 
     protected override async void OnClosing(WindowClosingEventArgs e)
     {
@@ -114,6 +132,18 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Closing the last window ends the app under ShutdownMode.OnLastWindowClose,
+        // which never raises ShutdownRequested — so the layout question belongs here
+        // too. Same cancel/await/re-close dance as the unsaved-changes guard above.
+        if (!_layoutHandled && App.IsLastWindow(this))
+        {
+            e.Cancel = true;
+            _layoutHandled = true;
+            await App.PromptSaveLayout(this);
+            Close();
+            return;
+        }
+
         base.OnClosing(e);
 
         _settings.IsMaximized = WindowState == WindowState.Maximized;
@@ -128,6 +158,78 @@ public partial class MainWindow : Window
 
         // Dispose the ViewModel to release image resources
         (DataContext as IDisposable)?.Dispose();
+    }
+
+    /// <summary>
+    /// Snapshots this window's geometry, monitor and open session for the saved layout.
+    /// </summary>
+    internal WindowLayout CaptureLayout()
+    {
+        var layout = new WindowLayout { IsMaximized = WindowState == WindowState.Maximized };
+
+        if (WindowState == WindowState.Normal)
+        {
+            layout.X = Position.X;
+            layout.Y = Position.Y;
+            layout.Width = Width;
+            layout.Height = Height;
+        }
+        else
+        {
+            // Maximized/fullscreen bounds aren't worth restoring as normal geometry —
+            // reuse the last known normal size, which _settings already tracks.
+            layout.X = _settings.X;
+            layout.Y = _settings.Y;
+            layout.Width = _settings.Width;
+            layout.Height = _settings.Height;
+        }
+
+        var screen = Screens.ScreenFromWindow(this);
+        if (screen != null)
+        {
+            layout.ScreenName = screen.DisplayName;
+            layout.ScreenX = screen.Bounds.X;
+            layout.ScreenY = screen.Bounds.Y;
+            layout.ScreenWidth = screen.Bounds.Width;
+            layout.ScreenHeight = screen.Bounds.Height;
+        }
+
+        (DataContext as MainWindowViewModel)?.CaptureSessionState(layout);
+        return layout;
+    }
+
+    /// <summary>
+    /// Applies saved geometry before the window is shown. Pass applyPosition: false for a
+    /// window that is being relocated because its monitor is gone — its saved coordinates
+    /// point off-screen, so showing there first would flash in the wrong place.
+    /// </summary>
+    internal void ApplyLayout(WindowLayout layout, bool applyPosition = true)
+    {
+        Width = layout.Width;
+        Height = layout.Height;
+
+        if (applyPosition)
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Position = new PixelPoint((int)layout.X, (int)layout.Y);
+        }
+        else
+        {
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        }
+    }
+
+    /// <summary>
+    /// Reasserts position once the window is on screen — pre-Show positioning is
+    /// advisory on some platforms, which is why App.PositionNearWindow works this way too.
+    /// </summary>
+    internal void ApplyLayoutAfterShow(WindowLayout layout, bool applyPosition = true)
+    {
+        if (applyPosition)
+            Position = new PixelPoint((int)layout.X, (int)layout.Y);
+
+        if (layout.IsMaximized)
+            WindowState = WindowState.Maximized;
     }
 
     protected override void OnDataContextChanged(EventArgs e)
