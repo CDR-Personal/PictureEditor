@@ -49,6 +49,14 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private int _adaptiveDebounceMs = 30;
     private readonly Stopwatch _renderStopwatch = new();
 
+    // Which way the user is browsing (+1 forward, -1 back) — decides which neighbour gets
+    // decoded in the background after each load.
+    private int _navigationDirection = 1;
+
+    // Bumped by every LoadFile so a load that waited on a background decode can tell it has
+    // been superseded by a newer one (a held arrow key can outrun a slow decode).
+    private int _loadSequence;
+
     // Double-buffered WriteableBitmaps — we alternate between two so Avalonia's
     // binding system always sees a new reference and triggers a visual update.
     private WriteableBitmap?[] _bitmapPool = new WriteableBitmap?[2];
@@ -410,6 +418,13 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
+            // Give an in-flight preload of this image the chance to land, then make sure a
+            // newer navigation hasn't started while we waited — the load below is synchronous,
+            // so from here on nothing can interleave.
+            var sequence = ++_loadSequence;
+            await _editor.WaitForPreloadAsync(filePath);
+            if (sequence != _loadSequence) return;
+
             _editor.LoadImage(filePath);
             _currentFilePath = filePath;
             _hasUnsavedChanges = false;
@@ -418,8 +433,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             ResizePercentage = 100;
             _suppressPreviewUpdate = false;
 
-            // Invalidate reusable bitmap since we loaded a new image
-            InvalidateBitmapPool();
+            // No InvalidateBitmapPool() here: RefreshDisplay reallocates the pool by itself
+            // when the new image has different dimensions, and when they match, reusing the
+            // pair saves two full-frame allocations on every navigation. The buffer written
+            // is always the one not on screen, so reuse is what slider previews already do.
 
             _titleStatus = null;
 
@@ -439,6 +456,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             RefreshDisplay();
             ReinitializeActiveMode();
             RunDuplicateCheck();
+            PreloadNeighbor();
         }
         catch (Exception ex)
         {
@@ -446,10 +464,49 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Decodes the image the user would land on by carrying on in the direction they were last
+    /// heading, so the next arrow press or slideshow tick only has to hand the pixels over.
+    /// </summary>
+    private void PreloadNeighbor()
+    {
+        var next = PeekNeighborPath(_navigationDirection);
+        if (next != null && !string.Equals(next, _currentFilePath, StringComparison.Ordinal))
+            _editor.Preload(next);
+    }
+
+    /// <summary>
+    /// The file <see cref="NavigateImage"/> would open for <paramref name="direction"/>, or null
+    /// when that can't be known yet (empty listing, or a shuffle pass about to be reshuffled).
+    /// </summary>
+    private string? PeekNeighborPath(int direction)
+    {
+        if (_directoryImages.Count == 0 || _currentImageIndex < 0) return null;
+
+        if (_isShuffleMode && _shuffledOrder != null)
+        {
+            var position = _shufflePosition + (direction > 0 ? 1 : -1);
+            if (position < 0 || position >= _shuffledOrder.Count) return null;
+            var shuffled = _shuffledOrder[position];
+            return shuffled >= 0 && shuffled < _directoryImages.Count ? _directoryImages[shuffled] : null;
+        }
+
+        return _directoryImages[WrapIndex(_currentImageIndex + direction)];
+    }
+
+    /// <summary>Wraps a stepped index around the ends of the directory listing.</summary>
+    private int WrapIndex(int index)
+    {
+        if (index < 0) return _directoryImages.Count - 1;
+        if (index >= _directoryImages.Count) return 0;
+        return index;
+    }
+
     public async Task NavigateImage(int direction)
     {
         if (_directoryImages.Count == 0) return;
 
+        _navigationDirection = direction >= 0 ? 1 : -1;
         int newIndex;
 
         if (_isShuffleMode && _shuffledOrder != null)
@@ -492,9 +549,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
         else
         {
-            newIndex = _currentImageIndex + direction;
-            if (newIndex < 0) newIndex = _directoryImages.Count - 1;
-            if (newIndex >= _directoryImages.Count) newIndex = 0;
+            newIndex = WrapIndex(_currentImageIndex + direction);
         }
 
         if (newIndex != _currentImageIndex)
@@ -1356,6 +1411,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (_directoryImages.Count == 0)
         {
+            _editor.ClearPreload(); // nothing left to navigate to
             _currentFilePath = null;
             _currentImageIndex = -1;
             HasImage = false;

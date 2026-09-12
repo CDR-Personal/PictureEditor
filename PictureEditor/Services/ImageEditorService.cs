@@ -31,6 +31,7 @@ public class ImageEditorService : IDisposable
 {
     private Image<Rgba32>? _currentImage;
     private Image<Rgba32>? _previewBase;
+    private readonly ImagePreloader _preloader = new();
 
     // Circular undo buffer — O(1) push and trim
     private const int MaxUndoSteps = 5;
@@ -46,13 +47,42 @@ public class ImageEditorService : IDisposable
     public bool CanUndo => _undoCount > 0;
     public bool HasPreviewBase => _previewBase != null;
 
+    /// <summary>
+    /// Makes <paramref name="filePath"/> the current image, adopting the background-decoded
+    /// copy when <see cref="Preload"/> was called for it and has finished. Stays synchronous
+    /// so callers can mutate their own state around it without an interleaving window; pair it
+    /// with <see cref="WaitForPreloadAsync"/> to give an in-flight preload time to land.
+    /// </summary>
     public void LoadImage(string filePath)
     {
+        var preloaded = _preloader.TakeIfReady(filePath);
+        ReleaseCurrent();
+        _currentImage = preloaded ?? Image.Load<Rgba32>(filePath);
+    }
+
+    /// <summary>
+    /// Starts decoding <paramref name="filePath"/> in the background, replacing any earlier
+    /// preload, so a later <see cref="LoadImage"/> of it costs nothing but the handoff.
+    /// </summary>
+    public void Preload(string filePath) => _preloader.Start(filePath);
+
+    /// <summary>
+    /// Completes once a preload of <paramref name="filePath"/> has finished decoding, or
+    /// immediately when none is in flight for it.
+    /// </summary>
+    public Task WaitForPreloadAsync(string filePath) => _preloader.WaitAsync(filePath);
+
+    /// <summary>Drops the preloaded image, e.g. when there is no longer a next image.</summary>
+    public void ClearPreload() => _preloader.Discard();
+
+    /// <summary>Releases the current image and everything derived from it.</summary>
+    private void ReleaseCurrent()
+    {
         _currentImage?.Dispose();
+        _currentImage = null;
         ClearUndoRing();
         _previewBase?.Dispose();
         _previewBase = null;
-        _currentImage = Image.Load<Rgba32>(filePath);
     }
 
     /// <summary>
@@ -589,6 +619,7 @@ public class ImageEditorService : IDisposable
 
     public void Dispose()
     {
+        _preloader.Dispose();
         _currentImage?.Dispose();
         ClearUndoRing();
         _previewBase?.Dispose();
