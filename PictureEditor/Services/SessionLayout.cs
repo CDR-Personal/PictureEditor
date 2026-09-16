@@ -43,9 +43,9 @@ public class WindowLayout
 }
 
 /// <summary>
-/// The set of windows open when the user last chose to save their layout.
-/// Stored alongside window.json; that file still holds the default geometry for
-/// brand-new windows, this one holds the whole session.
+/// The single anonymous layout written by versions before named layouts existed.
+/// Read-only now: <see cref="LayoutStore"/> imports it once into a named slot and
+/// then deletes layout.json. Nothing writes this file any more.
 /// </summary>
 public class SessionLayout
 {
@@ -56,8 +56,6 @@ public class SessionLayout
         "PictureEditor");
 
     private static readonly string LayoutPath = Path.Combine(SettingsDir, "layout.json");
-
-    private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
 
     /// <summary>Returns null when there is no usable saved layout.</summary>
     public static SessionLayout? Load()
@@ -74,23 +72,6 @@ public class SessionLayout
         {
             // Corrupt layout — fall back to a normal startup
             return null;
-        }
-    }
-
-    public void Save()
-    {
-        try
-        {
-            Directory.CreateDirectory(SettingsDir);
-            var json = JsonSerializer.Serialize(this, SerializerOptions);
-            // Atomic write: write to temp file then rename, so concurrent instances don't corrupt
-            var tempPath = LayoutPath + "." + Path.GetRandomFileName();
-            File.WriteAllText(tempPath, json);
-            File.Move(tempPath, LayoutPath, overwrite: true);
-        }
-        catch
-        {
-            // Non-critical, silently ignore
         }
     }
 

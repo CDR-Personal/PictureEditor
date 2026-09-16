@@ -44,6 +44,14 @@
             <MenuItem Header="_File">
                 <MenuItem Header="_New Window" Click="OnNewWindowClick" InputGesture="Cmd+N"/>
                 <Separator/>
+                <MenuItem Header="_Layouts" SubmenuOpened="OnLayoutsMenuOpened">
+                    <MenuItem Header="_Save Layout As..." Click="OnSaveLayoutAsClick"/>
+                    <MenuItem Header="S_witch Layout..." Click="OnSwitchLayoutClick"/>
+                    <Separator/>
+                    <MenuItem Header="_Rename Layout..." Click="OnRenameLayoutClick"/>
+                    <MenuItem Header="_Delete Layout..." Click="OnDeleteLayoutClick"/>
+                </MenuItem>
+                <Separator/>
                 <MenuItem Header="_Open File..." Command="{Binding OpenFileCommand}" InputGesture="Cmd+O"/>
                 <MenuItem Header="Open _Folder..." Command="{Binding OpenFolderCommand}" InputGesture="Cmd+Shift+O"/>
                 <Separator/>

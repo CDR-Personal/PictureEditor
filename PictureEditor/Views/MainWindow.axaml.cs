@@ -635,6 +635,53 @@ public partial class MainWindow : Window
         ShowHelpDialog();
     }
 
+    // Marks the layout entries appended to the Layouts submenu, so they can be
+    // rebuilt each time it opens without disturbing the fixed commands above them.
+    private const string LayoutEntryTag = "layout-entry";
+
+    private void OnLayoutsMenuOpened(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menu) return;
+
+        for (int i = menu.Items.Count - 1; i >= 0; i--)
+        {
+            if (menu.Items[i] is Control existing && Equals(existing.Tag, LayoutEntryTag))
+                menu.Items.RemoveAt(i);
+        }
+
+        var layouts = App.Layouts.Layouts;
+        if (layouts.Count == 0) return;
+
+        menu.Items.Add(new Separator { Tag = LayoutEntryTag });
+
+        for (int i = 0; i < layouts.Count; i++)
+        {
+            var layout = layouts[i];
+            var item = new MenuItem
+            {
+                // A name containing "_" would otherwise be read as an access key.
+                Header = $"{i + 1} - {layout.Name.Replace("_", "__")}",
+                Tag = LayoutEntryTag,
+                ToggleType = MenuItemToggleType.CheckBox,
+                IsChecked = string.Equals(layout.Name, App.ActiveLayoutName, StringComparison.OrdinalIgnoreCase)
+            };
+            item.Click += (_, _) => _ = App.SwitchToLayout(this, layout);
+            menu.Items.Add(item);
+        }
+    }
+
+    private void OnSaveLayoutAsClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
+        _ = App.SaveLayoutAs(this);
+
+    private void OnSwitchLayoutClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
+        _ = App.SwitchLayout(this);
+
+    private void OnRenameLayoutClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
+        _ = App.RenameLayout(this);
+
+    private void OnDeleteLayoutClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
+        _ = App.DeleteLayout(this);
+
     private void OnMoveHintsClick(object? sender, Avalonia.Input.PointerPressedEventArgs e)
     {
         _ = ShowMoveHelp();
@@ -764,6 +811,7 @@ public partial class MainWindow : Window
             ($"{mod}+J", "Jump To Image"),
             ($"{mod}+W", "Close Window"),
             ("1 \u2013 9", "Activate Window 1\u20139"),
+            ("0 \u2013 9", "Pick a layout (startup chooser)"),
             ("Left / Right", "Navigate Images"),
             ("Up / Down", "Fine Rotate (in rotate mode)"),
             ("Enter", "Apply Crop / Strip"),
@@ -894,90 +942,11 @@ public partial class MainWindow : Window
         return file?.Path.LocalPath;
     }
 
-    private async Task<bool> ShowConfirmDialog(string title, string message)
-    {
-        var dialog = new Window
-        {
-            Title = title,
-            Width = 350,
-            Height = 150,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            CanResize = false,
-            Focusable = true
-        };
+    private Task<bool> ShowConfirmDialog(string title, string message) =>
+        App.ShowConfirmDialog(this, title, message);
 
-        bool result = false;
-        var yesButton = new Button { Content = "_Yes", Width = 80 };
-        var noButton = new Button { Content = "_No", Width = 80 };
-
-        yesButton.Click += (_, _) => { result = true; dialog.Close(); };
-        noButton.Click += (_, _) => { result = false; dialog.Close(); };
-
-        dialog.KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Y) { result = true; dialog.Close(); e.Handled = true; }
-            else if (e.Key == Key.N || e.Key == Key.Escape) { result = false; dialog.Close(); e.Handled = true; }
-            else if (e.Key == Key.Return) { result = true; dialog.Close(); e.Handled = true; }
-        };
-
-        dialog.Content = new StackPanel
-        {
-            Margin = new Avalonia.Thickness(20),
-            Spacing = 15,
-            Children =
-            {
-                new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                new StackPanel
-                {
-                    Orientation = Avalonia.Layout.Orientation.Horizontal,
-                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-                    Spacing = 10,
-                    Children = { yesButton, noButton }
-                }
-            }
-        };
-
-        await dialog.ShowDialog(this);
-        return result;
-    }
-
-    private async Task ShowInfoDialog(string title, string message)
-    {
-        var dialog = new Window
-        {
-            Title = title,
-            Width = 360,
-            Height = 150,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            CanResize = false
-        };
-
-        var okButton = new Button { Content = "_OK", Width = 80, IsDefault = true };
-        okButton.Click += (_, _) => dialog.Close();
-
-        dialog.KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Return || e.Key == Key.Escape) { dialog.Close(); e.Handled = true; }
-        };
-
-        dialog.Content = new StackPanel
-        {
-            Margin = new Avalonia.Thickness(20),
-            Spacing = 15,
-            Children =
-            {
-                new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                new StackPanel
-                {
-                    Orientation = Avalonia.Layout.Orientation.Horizontal,
-                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-                    Children = { okButton }
-                }
-            }
-        };
-
-        await dialog.ShowDialog(this);
-    }
+    private Task ShowInfoDialog(string title, string message) =>
+        App.ShowInfoDialog(this, title, message);
 
     private CompareWindow? _activeCompareWindow;
 
@@ -1018,62 +987,8 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task<string?> ShowTextInputDialog(string title, string label, string defaultValue)
-    {
-        var dialog = new Window
-        {
-            Title = title,
-            Width = 420,
-            Height = 170,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            CanResize = false,
-            Focusable = true
-        };
-
-        string? result = null;
-        var textBox = new TextBox
-        {
-            Text = defaultValue,
-            SelectionStart = 0,
-            SelectionEnd = System.IO.Path.GetFileNameWithoutExtension(defaultValue).Length
-        };
-
-        var okButton = new Button { Content = "_OK", Width = 80 };
-        var cancelButton = new Button { Content = "_Cancel", Width = 80 };
-
-        void Submit() { result = textBox.Text; dialog.Close(); }
-
-        okButton.Click += (_, _) => Submit();
-        cancelButton.Click += (_, _) => dialog.Close();
-        textBox.KeyDown += (_, e) =>
-        {
-            if (e.Key == Key.Return) { Submit(); e.Handled = true; }
-            else if (e.Key == Key.Escape) { dialog.Close(); e.Handled = true; }
-        };
-
-        dialog.Content = new StackPanel
-        {
-            Margin = new Avalonia.Thickness(20),
-            Spacing = 12,
-            Children =
-            {
-                new TextBlock { Text = label },
-                textBox,
-                new StackPanel
-                {
-                    Orientation = Avalonia.Layout.Orientation.Horizontal,
-                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
-                    Spacing = 10,
-                    Children = { okButton, cancelButton }
-                }
-            }
-        };
-
-        dialog.Opened += (_, _) => textBox.Focus();
-
-        await dialog.ShowDialog(this);
-        return result;
-    }
+    private Task<string?> ShowTextInputDialog(string title, string label, string defaultValue) =>
+        App.ShowTextInputDialog(this, title, label, defaultValue);
 
     private async Task<ImageSortOrder?> ShowSortDialog(ImageSortOrder current)
     {
