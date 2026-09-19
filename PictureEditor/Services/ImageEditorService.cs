@@ -398,7 +398,9 @@ public class ImageEditorService : IDisposable
     public void RotateNoUndo(float degrees)
     {
         if (_currentImage == null || degrees == 0f) return;
-        _currentImage.Mutate(x => x.Rotate(degrees));
+        // Lanczos3 rather than ImageSharp's implicit Bicubic default: its kernel scales
+        // with the resampling ratio, so detail survives instead of aliasing.
+        _currentImage.Mutate(x => x.Rotate(degrees, KnownResamplers.Lanczos3));
     }
 
     public void ResizeNoUndo(double percentage)
@@ -407,7 +409,7 @@ public class ImageEditorService : IDisposable
         int newWidth = (int)(_currentImage.Width * percentage / 100.0);
         int newHeight = (int)(_currentImage.Height * percentage / 100.0);
         if (newWidth <= 0 || newHeight <= 0) return;
-        _currentImage.Mutate(x => x.Resize(newWidth, newHeight));
+        _currentImage.Mutate(x => x.Resize(newWidth, newHeight, KnownResamplers.Lanczos3));
     }
 
     // --- Standard operations with undo ---
