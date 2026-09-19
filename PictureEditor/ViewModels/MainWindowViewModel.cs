@@ -91,11 +91,6 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     // A counter, not a path, so reloading the same file (F12) still notifies.
     [ObservableProperty] private int _loadedImageToken;
 
-    // Tracks whether a preview render is in progress. Currently written but not observed:
-    // the adaptive-interpolation handler that consumed it was removed because it set and
-    // restored the mode synchronously, so no render pass ever saw the low-quality value.
-    [ObservableProperty] private bool _isPreviewActive;
-
     // Continuous/slideshow mode
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsChromeVisible))]
@@ -276,7 +271,6 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             await Task.Delay(_adaptiveDebounceMs, cts.Token);
             if (!cts.Token.IsCancellationRequested)
             {
-                IsPreviewActive = true;
                 _renderStopwatch.Restart();
                 action();
                 _renderStopwatch.Stop();
@@ -290,8 +284,6 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
                     > 50 => 50,
                     _ => 30
                 };
-
-                IsPreviewActive = false;
             }
         }
         catch (TaskCanceledException)
@@ -765,7 +757,6 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         IsResizeMode = false;
         IsAdjustMode = false;
         IsRotateMode = false;
-        IsPreviewActive = false;
     }
 
     // --- Resize mode ---
@@ -777,7 +768,6 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             CommitPendingPreview();
             IsResizeMode = false;
-            IsPreviewActive = false;
         }
         else
         {
@@ -800,7 +790,6 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             CommitPendingPreview();
             IsAdjustMode = false;
-            IsPreviewActive = false;
         }
         else
         {
@@ -823,7 +812,6 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             CommitPendingPreview();
             IsRotateMode = false;
-            IsPreviewActive = false;
         }
         else
         {
@@ -1472,7 +1460,6 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             CommitPendingPreview();
             IsRotateMode = false;
         }
-        IsPreviewActive = false;
     }
 
     private void InvalidateBitmapPool()
