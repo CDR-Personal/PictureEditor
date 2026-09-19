@@ -2,7 +2,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
-using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using PictureEditor.Services;
 using PictureEditor.ViewModels;
@@ -16,6 +15,7 @@ namespace PictureEditor.Views;
 public partial class MainWindow : Window
 {
     private readonly WindowSettings _settings;
+    private ImageZoomController? _zoom;
     private WindowState _preContinuousWindowState;
     private double _preContinuousWidth;
     private double _preContinuousHeight;
@@ -46,6 +46,22 @@ public partial class MainWindow : Window
 
         // Use tunnel routing so we get key events before child controls
         AddHandler(KeyDownEvent, OnPreviewKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+
+        // Zoom/pan. The transform targets ZoomContent (the Panel holding the Image *and*
+        // both overlays) rather than MainImage, so CropOverlay/StripOverlay scale in
+        // lockstep and their own coordinate math keeps working unchanged.
+        _zoom = new ImageZoomController(ZoomContent);
+        _zoom.ZoomChanged += OnZoomChanged;
+
+        // macOS trackpad pinch. This is the touchpad magnify gesture, NOT Gestures.PinchEvent
+        // (that one is driven by touchscreen contacts and never fires from a trackpad).
+        Gestures.AddPointerTouchPadGestureMagnifyHandler(ImageViewport, OnImageMagnify);
+        ImageViewport.AddHandler(PointerWheelChangedEvent, OnImageWheel,
+            Avalonia.Interactivity.RoutingStrategies.Bubble);
+        ImageViewport.DoubleTapped += OnImageDoubleTapped;
+        // Watch the content, not the Border: all zoom math is in the content frame, and
+        // opening a side panel resizes it (which changes the fit scale and pan limits).
+        ZoomContent.SizeChanged += (_, _) => _zoom?.Refresh();
 
         // Automatically show the folder picker when the window first opens
         Opened += OnWindowOpened;
@@ -250,21 +266,57 @@ public partial class MainWindow : Window
             vm.ShowMessageDialog = ShowInfoDialog;
             vm.ShowMoveHelpDialog = ShowMoveHelp;
 
-            // Subscribe to IsPreviewActive changes for adaptive interpolation quality
             vm.PropertyChanged += OnViewModelPropertyChanged;
         }
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(MainWindowViewModel.IsPreviewActive))
+        var vm = (MainWindowViewModel)sender!;
+
+        // Reset zoom per *image*, not per render: DisplayImage is reassigned on every
+        // preview frame while a slider is dragged, so resetting off it would fight the
+        // user mid-edit. LoadedImageToken bumps only when a file is loaded from disk.
+        if (e.PropertyName == nameof(MainWindowViewModel.LoadedImageToken))
         {
-            var vm = (MainWindowViewModel)sender!;
-            var quality = vm.IsPreviewActive
-                ? BitmapInterpolationMode.LowQuality
-                : BitmapInterpolationMode.MediumQuality;
-            RenderOptions.SetBitmapInterpolationMode(MainImage, quality);
+            _zoom?.Reset();
         }
+        else if (e.PropertyName == nameof(MainWindowViewModel.ImagePixelWidthValue) ||
+                 e.PropertyName == nameof(MainWindowViewModel.ImagePixelHeightValue))
+        {
+            _zoom?.SetImageSize(vm.ImagePixelWidthValue, vm.ImagePixelHeightValue);
+        }
+    }
+
+    private void OnZoomChanged(double percent)
+    {
+        if (DataContext is not MainWindowViewModel vm) return;
+        // Percentage of *actual pixels* (100% = one screen pixel per image pixel), matching
+        // the double-click-to-100% behaviour. Hidden while fitted, to keep the bar quiet.
+        vm.ZoomText = _zoom is { IsZoomed: true } ? $"{percent:F0}%" : "";
+    }
+
+    private void OnImageMagnify(object? sender, PointerDeltaEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm || !vm.HasImage) return;
+        // Delta is an incremental magnification from NSEvent, not an absolute scale.
+        _zoom?.ZoomBy(1.0 + e.Delta.X, _zoom.ToContentFrame(e.GetPosition(ImageViewport)));
+        e.Handled = true;
+    }
+
+    private void OnImageWheel(object? sender, PointerWheelEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm || !vm.HasImage) return;
+        if (_zoom is not { IsZoomed: true }) return;   // at fit, leave the wheel alone
+        _zoom.PanByWheel(e.Delta);
+        e.Handled = true;
+    }
+
+    private void OnImageDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm || !vm.HasImage) return;
+        _zoom?.ToggleActualSize(_zoom.ToContentFrame(e.GetPosition(ImageViewport)));
+        e.Handled = true;
     }
 
     private void OnEnterContinuousView()
@@ -309,6 +361,31 @@ public partial class MainWindow : Window
             vm.ToggleMode();
             e.Handled = true;
             return;
+        }
+
+        // Zoom keys. Cmd/Ctrl-modified, so they can't collide with the bare-digit window
+        // switching below (which requires KeyModifiers.None) or with Move-mode letters.
+        if (!inputHasFocus && vm.HasImage &&
+            (e.KeyModifiers.HasFlag(KeyModifiers.Meta) || e.KeyModifiers.HasFlag(KeyModifiers.Control)))
+        {
+            switch (e.Key)
+            {
+                case Key.OemPlus:
+                case Key.Add:
+                    _zoom?.ZoomByStep(true);
+                    e.Handled = true;
+                    return;
+                case Key.OemMinus:
+                case Key.Subtract:
+                    _zoom?.ZoomByStep(false);
+                    e.Handled = true;
+                    return;
+                case Key.D0:
+                case Key.NumPad0:
+                    _zoom?.Reset();
+                    e.Handled = true;
+                    return;
+            }
         }
 
         // Move-mode owns most keys when active. If it handles the key, stop here.
@@ -787,7 +864,7 @@ public partial class MainWindow : Window
         {
             Title = "Keyboard Shortcuts",
             Width = 420,
-            Height = 710,
+            Height = 830,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false
         };
@@ -817,6 +894,11 @@ public partial class MainWindow : Window
             ("Enter", "Apply Crop / Strip"),
             ("Space", "Start/Stop Slideshow"),
             ("*", "Toggle Shuffle (in slideshow)"),
+            ($"{mod}+= / {mod}+-", "Zoom In / Out"),
+            ($"{mod}+0", "Zoom to Fit"),
+            ("Pinch", "Zoom (trackpad)"),
+            ("Two-finger scroll", "Pan (when zoomed)"),
+            ("Double-click", "Toggle 100% / Fit"),
             ("Escape", "Cancel Current Mode"),
             ("F1", "Show This Help"),
             ("F2", "Rename Current File"),

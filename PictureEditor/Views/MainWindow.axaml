@@ -131,6 +131,7 @@
                 IsVisible="{Binding IsChromeVisible}">
             <DockPanel>
                 <TextBlock Text="{Binding ImageDimensions}" DockPanel.Dock="Right" Margin="8,0"/>
+                <TextBlock Text="{Binding ZoomText}" DockPanel.Dock="Right" Margin="8,0" Opacity="0.8"/>
                 <TextBlock Text="{Binding StatusText}"/>
             </DockPanel>
         </Border>
@@ -252,19 +253,20 @@
         </Border>
 
         <!-- Main Image Area -->
-        <Border Background="#1e1e1e">
+        <Border Background="#1e1e1e" x:Name="ImageViewport" ClipToBounds="True">
             <Panel>
                 <TextBlock Text="Open a file or directory to begin editing"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            Foreground="#888" FontSize="16"
                            IsVisible="{Binding !HasImage}"/>
 
-                <!-- Image display (no ScrollViewer - shrinks to fit) -->
-                <Panel IsVisible="{Binding HasImage}" Margin="10">
+                <!-- Image display: fits to the window, then zoom/pan is applied as a RenderTransform on
+                     this Panel (never on the Image alone) so the overlays below scale with it. -->
+                <Panel IsVisible="{Binding HasImage}" Margin="10" x:Name="ZoomContent">
                     <Image Source="{Binding DisplayImage}"
                            x:Name="MainImage"
                            Stretch="Uniform"
-                           RenderOptions.BitmapInterpolationMode="MediumQuality"/>
+                           RenderOptions.BitmapInterpolationMode="HighQuality"/>
 
                     <!-- Crop overlay: sits exactly on top of the image -->
                     <v:CropOverlay x:Name="CropOverlayControl"

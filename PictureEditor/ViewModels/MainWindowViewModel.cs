@@ -83,7 +83,17 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int _imagePixelWidthValue;
     [ObservableProperty] private int _imagePixelHeightValue;
 
-    // Tracks whether a preview render is in progress (for adaptive interpolation)
+    // Zoom percentage shown in the status bar; empty while fitted to the window.
+    [ObservableProperty] private string _zoomText = "";
+
+    // Bumped once per image actually loaded from disk. Zoom resets off this rather than
+    // off DisplayImage, which is reassigned on every preview frame during slider drags.
+    // A counter, not a path, so reloading the same file (F12) still notifies.
+    [ObservableProperty] private int _loadedImageToken;
+
+    // Tracks whether a preview render is in progress. Currently written but not observed:
+    // the adaptive-interpolation handler that consumed it was removed because it set and
+    // restored the mode synchronously, so no render pass ever saw the low-quality value.
     [ObservableProperty] private bool _isPreviewActive;
 
     // Continuous/slideshow mode
@@ -427,6 +437,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
             _editor.LoadImage(filePath);
             _currentFilePath = filePath;
+            LoadedImageToken++;
             _hasUnsavedChanges = false;
             _suppressPreviewUpdate = true;
             ResetAdjustments();
