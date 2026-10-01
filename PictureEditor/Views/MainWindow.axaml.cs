@@ -1039,6 +1039,9 @@ public partial class MainWindow : Window
         var compare = new CompareWindow();
         _activeCompareWindow = compare;
 
+        // Remember where the main window was so it can go back once the compare closes
+        var originalPosition = Position;
+
         try
         {
             compare.ShowImageForCompare(destinationFile);
@@ -1066,6 +1069,7 @@ public partial class MainWindow : Window
             compare.DisposeImage();
             compare.Close();
             if (_activeCompareWindow == compare) _activeCompareWindow = null;
+            Position = originalPosition;
         }
     }
 
