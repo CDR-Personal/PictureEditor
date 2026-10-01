@@ -267,6 +267,10 @@ public partial class MainWindow : Window
             vm.ShowMoveHelpDialog = ShowMoveHelp;
 
             vm.PropertyChanged += OnViewModelPropertyChanged;
+
+            // Once only: the macOS backend rejects a second top-level menu.
+            if (NativeMenu.GetMenu(this) == null)
+                BuildMenu(vm);
         }
     }
 
@@ -541,12 +545,14 @@ public partial class MainWindow : Window
                         vm.ToggleShuffleMode();
                         e.Handled = true;
                     }
-                    else if (e.KeyModifiers == KeyModifiers.None)
+                    else if (e.KeyModifiers is KeyModifiers.None or KeyModifiers.Alt)
                     {
                         int n = e.Key >= Key.NumPad1 && e.Key <= Key.NumPad9
                             ? e.Key - Key.NumPad0
                             : e.Key - Key.D0;
-                        App.ActivateWindow(n);
+                        // Bare digit switches to window N; Option/Alt+digit makes this window N.
+                        if (e.KeyModifiers == KeyModifiers.Alt) App.MoveWindowTo(this, n);
+                        else App.ActivateWindow(n);
                         e.Handled = true;
                     }
                 }
@@ -702,62 +708,188 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnNewWindowClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    // --- Menu bar ---------------------------------------------------------------
+
+    // File > Layouts, kept so its saved-layout entries can be rebuilt in place.
+    private NativeMenu? _layoutsMenu;
+
+    // The commands at the top of File > Layouts; the saved layouts are listed after them.
+    private const int FixedLayoutItems = 3;
+
+    /// <summary>
+    /// A view-model command that steps aside for a focused text field: there the key does
+    /// the field's own thing (undo typing, select all) instead of editing the image.
+    /// </summary>
+    private sealed class TextAwareCommand(
+        System.Windows.Input.ICommand inner, Func<TextBox?> focusedText, Action<TextBox> textAction)
+        : System.Windows.Input.ICommand
     {
-        App.CreateNewWindow(sourceWindow: this);
-    }
-
-    private void OnHelpClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        ShowHelpDialog();
-    }
-
-    // Marks the layout entries appended to the Layouts submenu, so they can be
-    // rebuilt each time it opens without disturbing the fixed commands above them.
-    private const string LayoutEntryTag = "layout-entry";
-
-    private void OnLayoutsMenuOpened(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (sender is not MenuItem menu) return;
-
-        for (int i = menu.Items.Count - 1; i >= 0; i--)
+        public event EventHandler? CanExecuteChanged
         {
-            if (menu.Items[i] is Control existing && Equals(existing.Tag, LayoutEntryTag))
-                menu.Items.RemoveAt(i);
+            add => inner.CanExecuteChanged += value;
+            remove => inner.CanExecuteChanged -= value;
         }
+
+        public bool CanExecute(object? parameter) => inner.CanExecute(parameter);
+
+        public void Execute(object? parameter)
+        {
+            if (focusedText() is { } box) textAction(box);
+            else inner.Execute(parameter);
+        }
+    }
+
+    /// <summary>
+    /// Builds this window's menu. macOS shows it in the system menu bar; elsewhere the
+    /// NativeMenuBar in the window renders the same items.
+    /// </summary>
+    private void BuildMenu(MainWindowViewModel vm)
+    {
+        static NativeMenuItem CommandItem(
+            string header, System.Windows.Input.ICommand command, string? gesture = null)
+        {
+            var item = new NativeMenuItem { Header = header, Command = command };
+            if (gesture != null) item.Gesture = KeyGesture.Parse(gesture);
+            return item;
+        }
+
+        static NativeMenuItem ClickItem(string header, Action action, string? gesture = null)
+        {
+            var item = new NativeMenuItem { Header = header };
+            item.Click += (_, _) => action();
+            if (gesture != null) item.Gesture = KeyGesture.Parse(gesture);
+            return item;
+        }
+
+        // Cmd+Z and Cmd+A mean something to a text field too, and both a menu shortcut and a
+        // window KeyBinding fire before the focused control sees the key. So while a text
+        // field has focus the menu gives up these two shortcuts, and the key bindings hand
+        // the key to the field. Choosing the menu item itself always edits the image.
+        var undoItem = CommandItem("_Undo", vm.UndoCommand, "Cmd+Z");
+        var autoColorItem = CommandItem("A_uto Color", vm.AutoColorCommand, "Cmd+A");
+        var undoKeys = undoItem.Gesture;
+        var autoColorKeys = autoColorItem.Gesture;
+
+        void SetTextFocus(bool inText)
+        {
+            undoItem.Gesture = inText ? null : undoKeys;
+            autoColorItem.Gesture = inText ? null : autoColorKeys;
+        }
+
+        AddHandler(GotFocusEvent, (_, e) => SetTextFocus(e.Source is TextBox),
+            Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
+        AddHandler(LostFocusEvent, (_, _) => SetTextFocus(false),
+            Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
+
+        TextBox? FocusedText() => FocusManager?.GetFocusedElement() as TextBox;
+        var undoKey = new TextAwareCommand(vm.UndoCommand, FocusedText, box => box.Undo());
+        var autoColorKey = new TextAwareCommand(vm.AutoColorCommand, FocusedText, box => box.SelectAll());
+
+        foreach (var mod in new[] { "Cmd", "Ctrl" })
+        {
+            KeyBindings.Add(new KeyBinding { Gesture = KeyGesture.Parse($"{mod}+Z"), Command = undoKey });
+            KeyBindings.Add(new KeyBinding { Gesture = KeyGesture.Parse($"{mod}+A"), Command = autoColorKey });
+        }
+
+        _layoutsMenu = new NativeMenu
+        {
+            ClickItem("_Manage Layouts...", () => _ = App.ManageLayouts(this)),
+            ClickItem("_Save Layout As...", () => _ = App.SaveLayoutAs(this)),
+            ClickItem("S_witch Layout...", () => _ = App.SwitchLayout(this))
+        };
+        RefreshLayoutsMenu();
+
+        var fileMenu = new NativeMenu
+        {
+            ClickItem("_New Window", () => App.CreateNewWindow(sourceWindow: this), "Cmd+N"),
+            new NativeMenuItemSeparator(),
+            new NativeMenuItem { Header = "_Layouts", Menu = _layoutsMenu },
+            new NativeMenuItemSeparator(),
+            CommandItem("_Open File...", vm.OpenFileCommand, "Cmd+O"),
+            CommandItem("Open _Folder...", vm.OpenFolderCommand, "Cmd+Shift+O"),
+            new NativeMenuItemSeparator(),
+            CommandItem("_Save", vm.SaveCommand, "Cmd+S"),
+            CommandItem("Save _As...", vm.SaveAsCommand, "Cmd+Shift+S")
+        };
+
+        var editMenu = new NativeMenu
+        {
+            undoItem,
+            new NativeMenuItemSeparator(),
+            CommandItem("Rotate _Left", vm.RotateLeftCommand, "Cmd+L"),
+            CommandItem("Rotate _Right", vm.RotateRightCommand, "Cmd+R"),
+            CommandItem("_Fine Rotate", vm.ToggleRotateModeCommand),
+            CommandItem("_Crop", vm.ToggleCropModeCommand, "Cmd+Shift+C"),
+            CommandItem("Remove _Strip", vm.ToggleStripModeCommand, "Cmd+X"),
+            CommandItem("Re_size", vm.ToggleResizeModeCommand),
+            CommandItem("_Adjustments", vm.ToggleAdjustModeCommand),
+            new NativeMenuItemSeparator(),
+            autoColorItem
+        };
+
+        var viewMenu = new NativeMenu
+        {
+            CommandItem("_Sort Images...", vm.ChangeSortCommand, "Cmd+T")
+        };
+
+        var helpMenu = new NativeMenu
+        {
+            ClickItem("_Keyboard Shortcuts", ShowHelpForMode, "F1")
+        };
+
+        NativeMenu.SetMenu(this, new NativeMenu
+        {
+            new NativeMenuItem { Header = "_File", Menu = fileMenu },
+            new NativeMenuItem { Header = "_Edit", Menu = editMenu },
+            new NativeMenuItem { Header = "_View", Menu = viewMenu },
+            new NativeMenuItem { Header = "_Help", Menu = helpMenu }
+        });
+    }
+
+    /// <summary>
+    /// Rebuilds the saved-layout entries at the bottom of File > Layouts. App calls this
+    /// whenever the layouts or the one in use change; the submenu is changed in place
+    /// because the macOS backend won't accept a replacement menu.
+    /// </summary>
+    internal void RefreshLayoutsMenu()
+    {
+        if (_layoutsMenu == null) return;
+
+        while (_layoutsMenu.Items.Count > FixedLayoutItems)
+            _layoutsMenu.Items.RemoveAt(_layoutsMenu.Items.Count - 1);
 
         var layouts = App.Layouts.Layouts;
         if (layouts.Count == 0) return;
 
-        menu.Items.Add(new Separator { Tag = LayoutEntryTag });
+        _layoutsMenu.Add(new NativeMenuItemSeparator());
 
         for (int i = 0; i < layouts.Count; i++)
         {
             var layout = layouts[i];
-            var item = new MenuItem
+            var item = new NativeMenuItem
             {
                 // A name containing "_" would otherwise be read as an access key.
                 Header = $"{i + 1} - {layout.Name.Replace("_", "__")}",
-                Tag = LayoutEntryTag,
-                ToggleType = MenuItemToggleType.CheckBox,
+                ToggleType = NativeMenuItemToggleType.CheckBox,
                 IsChecked = string.Equals(layout.Name, App.ActiveLayoutName, StringComparison.OrdinalIgnoreCase)
             };
-            item.Click += (_, _) => _ = App.SwitchToLayout(this, layout);
-            menu.Items.Add(item);
+            item.Click += async (_, _) =>
+            {
+                await App.SwitchToLayout(this, layout);
+                // A switch that didn't happen leaves the in-window menu's own check toggle
+                // behind. A switch that did has closed this window.
+                if (IsVisible) RefreshLayoutsMenu();
+            };
+            _layoutsMenu.Add(item);
         }
     }
 
-    private void OnSaveLayoutAsClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
-        _ = App.SaveLayoutAs(this);
-
-    private void OnSwitchLayoutClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
-        _ = App.SwitchLayout(this);
-
-    private void OnRenameLayoutClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
-        _ = App.RenameLayout(this);
-
-    private void OnDeleteLayoutClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) =>
-        _ = App.DeleteLayout(this);
+    // Each mode has its own key list, in the menu as on F1.
+    private void ShowHelpForMode()
+    {
+        if (DataContext is MainWindowViewModel { IsMoveMode: true }) _ = ShowMoveHelp();
+        else ShowHelpDialog();
+    }
 
     private void OnMoveHintsClick(object? sender, Avalonia.Input.PointerPressedEventArgs e)
     {
@@ -863,14 +995,21 @@ public partial class MainWindow : Window
         var dialog = new Window
         {
             Title = "Keyboard Shortcuts",
-            Width = 420,
-            Height = 830,
+            MinWidth = 420,
+            SizeToContent = SizeToContent.WidthAndHeight,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false
         };
 
-        var mod = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
-            System.Runtime.InteropServices.OSPlatform.OSX) ? "Cmd" : "Ctrl";
+        // Sized to show every row. On a screen too short for that, the list scrolls and
+        // Close stays put at the bottom.
+        if (Screens.ScreenFromWindow(this) is { } screen)
+            dialog.MaxHeight = screen.WorkingArea.Height / screen.Scaling - 60;
+
+        bool isMac = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+            System.Runtime.InteropServices.OSPlatform.OSX);
+        var mod = isMac ? "Cmd" : "Ctrl";
+        var alt = isMac ? "Option" : "Alt";
 
         var hotkeys = new (string Key, string Description)[]
         {
@@ -886,8 +1025,10 @@ public partial class MainWindow : Window
             ($"{mod}+X", "Remove Strip Mode"),
             ($"{mod}+A", "Auto Color"),
             ($"{mod}+J", "Jump To Image"),
+            ($"{mod}+T", "Sort Images"),
             ($"{mod}+W", "Close Window"),
             ("1 \u2013 9", "Activate Window 1\u20139"),
+            ($"{alt}+1 \u2013 9", "Move This Window to 1\u20139"),
             ("0 \u2013 9", "Pick a layout (startup chooser)"),
             ("Left / Right", "Navigate Images"),
             ("Up / Down", "Fine Rotate (in rotate mode)"),
@@ -936,7 +1077,9 @@ public partial class MainWindow : Window
         {
             Content = "Close",
             Width = 80,
-            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+            Margin = new Avalonia.Thickness(0, 16, 0, 0),
+            [DockPanel.DockProperty] = Dock.Bottom
         };
         closeButton.Click += (_, _) => dialog.Close();
 
@@ -949,10 +1092,9 @@ public partial class MainWindow : Window
             }
         };
 
-        dialog.Content = new StackPanel
+        dialog.Content = new DockPanel
         {
             Margin = new Avalonia.Thickness(20),
-            Spacing = 16,
             Children =
             {
                 new TextBlock
@@ -960,14 +1102,12 @@ public partial class MainWindow : Window
                     Text = "Keyboard Shortcuts",
                     FontSize = 20,
                     FontWeight = Avalonia.Media.FontWeight.Bold,
-                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+                    Margin = new Avalonia.Thickness(0, 0, 0, 16),
+                    [DockPanel.DockProperty] = Dock.Top
                 },
-                new ScrollViewer
-                {
-                    Content = list,
-                    MaxHeight = 570
-                },
-                closeButton
+                closeButton,
+                new ScrollViewer { Content = list }
             }
         };
 

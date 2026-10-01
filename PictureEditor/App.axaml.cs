@@ -88,6 +88,23 @@ public partial class App : Application
         w.Focus();
     }
 
+    /// <summary>
+    /// Moves <paramref name="window"/> to position <paramref name="number"/> (1-based); the
+    /// windows in between shift by one. A number past the last window means "last".
+    /// </summary>
+    public static void MoveWindowTo(MainWindow window, int number)
+    {
+        int from = _openWindows.IndexOf(window);
+        if (from < 0 || number < 1) return;
+
+        int to = Math.Min(number, _openWindows.Count) - 1;
+        if (to == from) return;
+
+        _openWindows.RemoveAt(from);
+        _openWindows.Insert(to, window);
+        RenumberWindows();
+    }
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -481,9 +498,8 @@ public partial class App : Application
         _ => -1
     };
 
-    private static List<MainWindow> OpenWindows() =>
-        (Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)
-            ?.Windows.OfType<MainWindow>().ToList() ?? new List<MainWindow>();
+    // In window-number order, so a layout saved from these restores with the same numbering.
+    private static List<MainWindow> OpenWindows() => _openWindows.ToList();
 
     /// <summary>
     /// Stores <paramref name="captured"/> under a new name, replacing an existing layout
@@ -500,7 +516,7 @@ public partial class App : Application
             if (replace == null) return null;
 
             replace.Windows = captured;
-            Layouts.Save();
+            SaveLayouts();
             return replace.Name;
         }
 
@@ -521,9 +537,20 @@ public partial class App : Application
             }
 
             Layouts.Layouts.Add(new NamedLayout { Name = name, Windows = captured });
-            Layouts.Save();
+            SaveLayouts();
             return name;
         }
+    }
+
+    /// <summary>
+    /// Writes the layouts to disk and brings every window's Layouts menu up to date.
+    /// Every change to the store or to the layout in use goes through here.
+    /// </summary>
+    private static void SaveLayouts()
+    {
+        Layouts.Save();
+        foreach (var w in _openWindows)
+            w.RefreshLayoutsMenu();
     }
 
     private static void SetActiveLayout(string? name)
@@ -531,7 +558,7 @@ public partial class App : Application
         ActiveLayoutName = name;
         if (name != null)
             Layouts.LastUsed = name;
-        Layouts.Save();
+        SaveLayouts();
     }
 
     /// <summary>
@@ -614,7 +641,7 @@ public partial class App : Application
             await ShowConfirmDialog(owner, "Update Layout", $"Update current layout ({active.Name})?"))
         {
             active.Windows = windows.Select(w => w.CaptureLayout()).ToList();
-            Layouts.Save();
+            SaveLayouts();
         }
 
         var unsavedCount = windows.Count(
@@ -645,13 +672,8 @@ public partial class App : Application
         desktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
     }
 
-    internal static async Task RenameLayout(Window owner)
+    private static async Task RenameLayout(Window owner, NamedLayout target)
     {
-        if (!await RequireSavedLayouts(owner, "Rename Layout")) return;
-
-        var target = await ShowLayoutChooser(owner, "Rename Layout", "Rename which layout?", includeDefault: false);
-        if (target == null) return;
-
         while (true)
         {
             var entered = await ShowTextInputDialog(owner, "Rename Layout", "New name:", target.Name);
@@ -672,18 +694,13 @@ public partial class App : Application
             if (NameEquals(ActiveLayoutName, target.Name)) ActiveLayoutName = name;
             if (NameEquals(Layouts.LastUsed, target.Name)) Layouts.LastUsed = name;
             target.Name = name;
-            Layouts.Save();
+            SaveLayouts();
             return;
         }
     }
 
-    internal static async Task DeleteLayout(Window owner)
+    private static async Task DeleteLayout(Window owner, NamedLayout target)
     {
-        if (!await RequireSavedLayouts(owner, "Delete Layout")) return;
-
-        var target = await ShowLayoutChooser(owner, "Delete Layout", "Delete which layout?", includeDefault: false);
-        if (target == null) return;
-
         if (!await ShowConfirmDialog(owner, "Delete Layout",
                 $"Delete the layout \"{target.Name}\"?\n\nThe windows open now are not affected."))
             return;
@@ -691,7 +708,144 @@ public partial class App : Application
         Layouts.Layouts.Remove(target);
         if (NameEquals(ActiveLayoutName, target.Name)) ActiveLayoutName = null;
         if (NameEquals(Layouts.LastUsed, target.Name)) Layouts.LastUsed = null;
-        Layouts.Save();
+        SaveLayouts();
+    }
+
+    /// <summary>
+    /// The layout editor: one list to renumber, rename and delete saved layouts. A layout's
+    /// number is its position in the store, so renumbering is a move within that list.
+    /// </summary>
+    internal static async Task ManageLayouts(Window owner)
+    {
+        if (!await RequireSavedLayouts(owner, "Manage Layouts")) return;
+
+        var layouts = Layouts.Layouts;
+        var alt = OperatingSystem.IsMacOS() ? "Option" : "Alt";
+
+        var dialog = new Window
+        {
+            Title = "Manage Layouts",
+            Width = 480,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Focusable = true
+        };
+
+        var list = new ListBox { MaxHeight = 320 };
+
+        void Refresh(int select)
+        {
+            list.ItemsSource = layouts
+                .Select((l, i) => $"{i + 1} - {l.Name}" + (NameEquals(l.Name, ActiveLayoutName) ? "  (in use)" : ""))
+                .ToList();
+            list.SelectedIndex = Math.Clamp(select, 0, layouts.Count - 1);
+            list.Focus();
+        }
+
+        // Insert and shift, the same rule Option+digit applies to window numbers.
+        void MoveSelected(int to)
+        {
+            int from = list.SelectedIndex;
+            if (from < 0) return;
+
+            to = Math.Clamp(to, 0, layouts.Count - 1);
+            if (to != from)
+            {
+                var layout = layouts[from];
+                layouts.RemoveAt(from);
+                layouts.Insert(to, layout);
+                SaveLayouts();
+            }
+            Refresh(to);
+        }
+
+        async Task RenameSelected()
+        {
+            int index = list.SelectedIndex;
+            if (index < 0) return;
+
+            await RenameLayout(dialog, layouts[index]);
+            Refresh(index);
+        }
+
+        async Task DeleteSelected()
+        {
+            int index = list.SelectedIndex;
+            if (index < 0) return;
+
+            await DeleteLayout(dialog, layouts[index]);
+
+            // Nothing left to manage.
+            if (layouts.Count == 0) dialog.Close();
+            else Refresh(index);
+        }
+
+        var upButton = new Button { Content = "Move _Up" };
+        var downButton = new Button { Content = "Move Do_wn" };
+        var renameButton = new Button { Content = "_Rename..." };
+        var deleteButton = new Button { Content = "_Delete" };
+        var closeButton = new Button { Content = "_Close" };
+
+        upButton.Click += (_, _) => MoveSelected(list.SelectedIndex - 1);
+        downButton.Click += (_, _) => MoveSelected(list.SelectedIndex + 1);
+        renameButton.Click += (_, _) => _ = RenameSelected();
+        deleteButton.Click += (_, _) => _ = DeleteSelected();
+        closeButton.Click += (_, _) => dialog.Close();
+
+        // Tunnelled so Option+Up/Down reach us before the list takes them as selection moves.
+        dialog.AddHandler(InputElement.KeyDownEvent, (_, e) =>
+        {
+            bool altOnly = e.KeyModifiers == KeyModifiers.Alt;
+            bool bare = e.KeyModifiers == KeyModifiers.None;
+            var digit = DigitFromKey(e.Key);
+
+            if (digit > 0 && altOnly) MoveSelected(digit - 1);
+            else if (digit > 0 && bare) { if (digit <= layouts.Count) Refresh(digit - 1); }
+            else if (e.Key == Key.Up && altOnly) MoveSelected(list.SelectedIndex - 1);
+            else if (e.Key == Key.Down && altOnly) MoveSelected(list.SelectedIndex + 1);
+            else if (e.Key == Key.F2) _ = RenameSelected();
+            else if (e.Key is Key.Delete or Key.Back) _ = DeleteSelected();
+            else if (e.Key == Key.Escape) dialog.Close();
+            else return;
+
+            e.Handled = true;
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+
+        dialog.Content = new StackPanel
+        {
+            Margin = new Thickness(20),
+            Spacing = 12,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = "Saved layouts",
+                    FontSize = 15,
+                    FontWeight = FontWeight.Bold
+                },
+                list,
+                new TextBlock
+                {
+                    Text = $"1–9 selects.  {alt}+1–9 or {alt}+Up/Down renumbers.  F2 renames.  Delete removes.",
+                    TextWrapping = TextWrapping.Wrap,
+                    Opacity = 0.7
+                },
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Spacing = 8,
+                    Children = { upButton, downButton, renameButton, deleteButton, closeButton }
+                }
+            }
+        };
+
+        // Start on the layout in use, when there is one.
+        Refresh(Math.Max(0, layouts.FindIndex(l => NameEquals(l.Name, ActiveLayoutName))));
+        dialog.Opened += (_, _) => list.Focus();
+
+        await dialog.ShowDialog(owner);
     }
 
     private bool _shutdownConfirmed;

@@ -71,7 +71,13 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     partial void OnWindowNumberChanged(int value) => UpdateTitle();
 
     [ObservableProperty] private string _statusText = "Open a file or directory to begin";
-    [ObservableProperty] private bool _hasImage;
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SaveCommand), nameof(SaveAsCommand),
+        nameof(RotateLeftCommand), nameof(RotateRightCommand), nameof(AutoColorCommand),
+        nameof(ToggleCropModeCommand), nameof(ToggleStripModeCommand),
+        nameof(ToggleResizeModeCommand), nameof(ToggleAdjustModeCommand),
+        nameof(ToggleRotateModeCommand), nameof(ChangeSortCommand))]
+    private bool _hasImage;
     [ObservableProperty] private bool _canUndo;
     [ObservableProperty] private bool _isCropMode;
     [ObservableProperty] private bool _isResizeMode;
@@ -94,6 +100,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     // Continuous/slideshow mode
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsChromeVisible))]
+    [NotifyCanExecuteChangedFor(nameof(ChangeSortCommand))]
     private bool _isContinuousMode;
 
     // Adjustment slider values
@@ -119,11 +126,21 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [NotifyPropertyChangedFor(nameof(IsEditMode))]
     [NotifyPropertyChangedFor(nameof(IsMoveMode))]
     [NotifyPropertyChangedFor(nameof(IsChromeVisible))]
+    // The menu bar stays up in Move mode, so its Edit-only items have to grey out.
+    [NotifyCanExecuteChangedFor(nameof(SaveCommand), nameof(SaveAsCommand), nameof(UndoCommand),
+        nameof(RotateLeftCommand), nameof(RotateRightCommand), nameof(AutoColorCommand),
+        nameof(ToggleCropModeCommand), nameof(ToggleStripModeCommand),
+        nameof(ToggleResizeModeCommand), nameof(ToggleAdjustModeCommand),
+        nameof(ToggleRotateModeCommand), nameof(ChangeSortCommand))]
     private AppMode _mode = AppMode.Edit;
 
     public bool IsEditMode => Mode == AppMode.Edit;
     public bool IsMoveMode => Mode == AppMode.Move;
     public bool IsChromeVisible => IsEditMode && !IsContinuousMode;
+
+    // The menu is the only way in to these, so the commands carry the rules themselves.
+    private bool CanEditImage => IsEditMode && HasImage;
+    private bool CanSortImages => IsChromeVisible && HasImage;
 
     [ObservableProperty] private bool _checkForDuplicates = true;
     [ObservableProperty] private string _moveModeHints = FullMoveHints;
@@ -564,7 +581,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     // --- Edit operations ---
 
-    [RelayCommand(CanExecute = nameof(IsEditMode))]
+    [RelayCommand(CanExecute = nameof(CanEditImage))]
     private void RotateLeft()
     {
         CommitPendingPreview();
@@ -575,7 +592,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ReinitializeActiveMode();
     }
 
-    [RelayCommand(CanExecute = nameof(IsEditMode))]
+    [RelayCommand(CanExecute = nameof(CanEditImage))]
     private void RotateRight()
     {
         CommitPendingPreview();
@@ -586,7 +603,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         ReinitializeActiveMode();
     }
 
-    [RelayCommand(CanExecute = nameof(IsEditMode))]
+    [RelayCommand(CanExecute = nameof(CanEditImage))]
     private void AutoColor()
     {
         CommitPendingPreview();
@@ -624,7 +641,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     // --- Crop mode ---
 
-    [RelayCommand(CanExecute = nameof(IsEditMode))]
+    [RelayCommand(CanExecute = nameof(CanEditImage))]
     private void ToggleCropMode()
     {
         if (IsCropMode)
@@ -673,7 +690,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     // --- Strip removal mode ---
 
-    [RelayCommand(CanExecute = nameof(IsEditMode))]
+    [RelayCommand(CanExecute = nameof(CanEditImage))]
     private void ToggleStripMode()
     {
         if (IsStripMode)
@@ -761,7 +778,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     // --- Resize mode ---
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEditImage))]
     private void ToggleResizeMode()
     {
         if (IsResizeMode)
@@ -783,7 +800,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     // --- Adjust mode ---
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEditImage))]
     private void ToggleAdjustMode()
     {
         if (IsAdjustMode)
@@ -805,7 +822,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     // --- Rotate by degree mode ---
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEditImage))]
     private void ToggleRotateMode()
     {
         if (IsRotateMode)
@@ -833,7 +850,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     // --- Save ---
 
-    [RelayCommand(CanExecute = nameof(IsEditMode))]
+    [RelayCommand(CanExecute = nameof(CanEditImage))]
     private async Task Save()
     {
         if (_currentFilePath == null || !_editor.HasImage) return;
@@ -891,7 +908,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         return candidate;
     }
 
-    [RelayCommand(CanExecute = nameof(IsEditMode))]
+    [RelayCommand(CanExecute = nameof(CanEditImage))]
     private async Task SaveAs()
     {
         if (!_editor.HasImage) return;
@@ -1613,7 +1630,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanSortImages))]
     private async Task ChangeSort()
     {
         if (SortDialog == null) return;

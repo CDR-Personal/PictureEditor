@@ -18,62 +18,30 @@
     </Design.DataContext>
 
     <Window.KeyBindings>
+        <!-- Undo and Auto Color (Cmd/Ctrl+Z, Cmd/Ctrl+A) are bound in BuildMenu, where they
+             step aside for a focused text field. -->
         <KeyBinding Gesture="Cmd+O" Command="{Binding OpenFileCommand}"/>
         <KeyBinding Gesture="Cmd+Shift+O" Command="{Binding OpenFolderCommand}"/>
         <KeyBinding Gesture="Cmd+S" Command="{Binding SaveCommand}"/>
         <KeyBinding Gesture="Cmd+Shift+S" Command="{Binding SaveAsCommand}"/>
-        <KeyBinding Gesture="Cmd+Z" Command="{Binding UndoCommand}"/>
         <KeyBinding Gesture="Cmd+L" Command="{Binding RotateLeftCommand}"/>
         <KeyBinding Gesture="Cmd+R" Command="{Binding RotateRightCommand}"/>
         <KeyBinding Gesture="Ctrl+O" Command="{Binding OpenFileCommand}"/>
         <KeyBinding Gesture="Ctrl+Shift+O" Command="{Binding OpenFolderCommand}"/>
         <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}"/>
         <KeyBinding Gesture="Ctrl+Shift+S" Command="{Binding SaveAsCommand}"/>
-        <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoCommand}"/>
         <KeyBinding Gesture="Ctrl+L" Command="{Binding RotateLeftCommand}"/>
         <KeyBinding Gesture="Ctrl+R" Command="{Binding RotateRightCommand}"/>
         <KeyBinding Gesture="Cmd+Shift+C" Command="{Binding ToggleCropModeCommand}"/>
         <KeyBinding Gesture="Ctrl+Shift+C" Command="{Binding ToggleCropModeCommand}"/>
-        <KeyBinding Gesture="Cmd+A" Command="{Binding AutoColorCommand}"/>
-        <KeyBinding Gesture="Ctrl+A" Command="{Binding AutoColorCommand}"/>
+        <KeyBinding Gesture="Cmd+T" Command="{Binding ChangeSortCommand}"/>
+        <KeyBinding Gesture="Ctrl+T" Command="{Binding ChangeSortCommand}"/>
     </Window.KeyBindings>
 
     <DockPanel>
-        <!-- Menu Bar -->
-        <Menu DockPanel.Dock="Top" IsVisible="{Binding IsChromeVisible}">
-            <MenuItem Header="_File">
-                <MenuItem Header="_New Window" Click="OnNewWindowClick" InputGesture="Cmd+N"/>
-                <Separator/>
-                <MenuItem Header="_Layouts" SubmenuOpened="OnLayoutsMenuOpened">
-                    <MenuItem Header="_Save Layout As..." Click="OnSaveLayoutAsClick"/>
-                    <MenuItem Header="S_witch Layout..." Click="OnSwitchLayoutClick"/>
-                    <Separator/>
-                    <MenuItem Header="_Rename Layout..." Click="OnRenameLayoutClick"/>
-                    <MenuItem Header="_Delete Layout..." Click="OnDeleteLayoutClick"/>
-                </MenuItem>
-                <Separator/>
-                <MenuItem Header="_Open File..." Command="{Binding OpenFileCommand}" InputGesture="Cmd+O"/>
-                <MenuItem Header="Open _Folder..." Command="{Binding OpenFolderCommand}" InputGesture="Cmd+Shift+O"/>
-                <Separator/>
-                <MenuItem Header="_Save" Command="{Binding SaveCommand}" InputGesture="Cmd+S"/>
-                <MenuItem Header="Save _As..." Command="{Binding SaveAsCommand}" InputGesture="Cmd+Shift+S"/>
-            </MenuItem>
-            <MenuItem Header="_Edit">
-                <MenuItem Header="_Undo" Command="{Binding UndoCommand}" InputGesture="Cmd+Z"/>
-                <Separator/>
-                <MenuItem Header="Rotate _Left" Command="{Binding RotateLeftCommand}" InputGesture="Cmd+L"/>
-                <MenuItem Header="Rotate _Right" Command="{Binding RotateRightCommand}" InputGesture="Cmd+R"/>
-                <MenuItem Header="_Crop" Command="{Binding ToggleCropModeCommand}" InputGesture="Cmd+Shift+C"/>
-                <MenuItem Header="Remove _Strip" Command="{Binding ToggleStripModeCommand}" InputGesture="Cmd+X"/>
-                <MenuItem Header="Re_size" Command="{Binding ToggleResizeModeCommand}"/>
-                <MenuItem Header="_Adjustments" Command="{Binding ToggleAdjustModeCommand}"/>
-                <Separator/>
-                <MenuItem Header="A_uto Color" Command="{Binding AutoColorCommand}" InputGesture="Cmd+A"/>
-            </MenuItem>
-            <MenuItem Header="_Help">
-                <MenuItem Header="_Keyboard Shortcuts" InputGesture="F1" Click="OnHelpClick"/>
-            </MenuItem>
-        </Menu>
+        <!-- Menu bar. The menu itself is built in BuildMenu (code-behind): macOS shows it in
+             the system menu bar and this control stays empty; elsewhere it renders here. -->
+        <NativeMenuBar DockPanel.Dock="Top" IsVisible="{Binding IsChromeVisible}"/>
 
         <!-- Move-mode hint strip (replaces chrome when in Move mode) -->
         <Border DockPanel.Dock="Top" Background="#2d3a4f"
@@ -96,33 +64,6 @@
                            VerticalAlignment="Center"
                            FontFamily="Menlo,Consolas,monospace"/>
             </DockPanel>
-        </Border>
-
-        <!-- Toolbar (vertical, left side) -->
-        <Border DockPanel.Dock="Left" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
-                Padding="4,6" BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
-                BorderThickness="0,0,1,0"
-                IsVisible="{Binding IsChromeVisible}">
-            <StackPanel Orientation="Vertical" Spacing="4">
-                <Button Content="Open File" Command="{Binding OpenFileCommand}" ToolTip.Tip="Open image file (Cmd+O)" HorizontalAlignment="Stretch"/>
-                <Button Content="Open Folder" Command="{Binding OpenFolderCommand}" ToolTip.Tip="Open folder (Cmd+Shift+O)" HorizontalAlignment="Stretch"/>
-                <Border Height="1" Background="Gray" Margin="2,4"/>
-                <Button Content="Undo" Command="{Binding UndoCommand}" IsEnabled="{Binding CanUndo}" ToolTip.Tip="Undo (Cmd+Z)" HorizontalAlignment="Stretch"/>
-                <Border Height="1" Background="Gray" Margin="2,4"/>
-                <Button Content="Rotate Left" Command="{Binding RotateLeftCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Rotate left (Cmd+L)" HorizontalAlignment="Stretch"/>
-                <Button Content="Rotate Right" Command="{Binding RotateRightCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Rotate right (Cmd+R)" HorizontalAlignment="Stretch"/>
-                <Button Content="Fine Rotate" Command="{Binding ToggleRotateModeCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Rotate by degree (Up/Down keys)" HorizontalAlignment="Stretch"/>
-                <Button Content="Crop" Command="{Binding ToggleCropModeCommand}" IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"/>
-                <Button Content="Remove Strip" Command="{Binding ToggleStripModeCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Remove a vertical strip from the image" HorizontalAlignment="Stretch"/>
-                <Button Content="Resize" Command="{Binding ToggleResizeModeCommand}" IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"/>
-                <Button Content="Adjust" Command="{Binding ToggleAdjustModeCommand}" IsEnabled="{Binding HasImage}" HorizontalAlignment="Stretch"/>
-                <Button Content="Auto Color" Command="{Binding AutoColorCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Automatic color correction (Cmd+A)" HorizontalAlignment="Stretch"/>
-                <Border Height="1" Background="Gray" Margin="2,4"/>
-                <Button Content="Save" Command="{Binding SaveCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Save (Cmd+S)" HorizontalAlignment="Stretch"/>
-                <Button Content="Save As" Command="{Binding SaveAsCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Save As (Cmd+Shift+S)" HorizontalAlignment="Stretch"/>
-                <Border Height="1" Background="Gray" Margin="2,4"/>
-                <Button Content="Sort" Command="{Binding ChangeSortCommand}" IsEnabled="{Binding HasImage}" ToolTip.Tip="Change image sort order" HorizontalAlignment="Stretch"/>
-            </StackPanel>
         </Border>
 
         <!-- Status Bar -->
