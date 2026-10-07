@@ -31,6 +31,10 @@ public class ImageEditorService : IDisposable
 {
     private Image<Rgba32>? _currentImage;
     private Image<Rgba32>? _previewBase;
+    // Noise-reduced copy of _previewBase, kept so the median filter runs once per radius
+    // rather than on every preview frame.
+    private Image<Rgba32>? _denoisedBase;
+    private int _denoisedRadius;
     private readonly ImagePreloader _preloader = new();
 
     // Circular undo buffer — O(1) push and trim
@@ -83,6 +87,7 @@ public class ImageEditorService : IDisposable
         ClearUndoRing();
         _previewBase?.Dispose();
         _previewBase = null;
+        ClearDenoisedBase();
     }
 
     /// <summary>
@@ -198,20 +203,34 @@ public class ImageEditorService : IDisposable
     {
         _previewBase?.Dispose();
         _previewBase = _currentImage?.Clone();
+        ClearDenoisedBase();
     }
 
     /// <summary>
     /// Fast restore: copies pixel data from preview base into current image
     /// without allocating a new Image. Falls back to clone if dimensions differ.
+    /// A positive <paramref name="noiseReductionRadius"/> restores a median-filtered
+    /// copy of the base instead.
     /// </summary>
-    public void RestoreFromPreviewBase()
+    public void RestoreFromPreviewBase(int noiseReductionRadius = 0)
     {
         if (_previewBase == null || _currentImage == null) return;
 
-        if (_currentImage.Width == _previewBase.Width && _currentImage.Height == _previewBase.Height)
+        Image<Rgba32> source;
+        if (noiseReductionRadius > 0)
+        {
+            source = GetDenoisedBase(noiseReductionRadius);
+        }
+        else
+        {
+            ClearDenoisedBase();
+            source = _previewBase;
+        }
+
+        if (_currentImage.Width == source.Width && _currentImage.Height == source.Height)
         {
             // Fast path: copy pixel rows directly
-            _previewBase.ProcessPixelRows(_currentImage, (srcAcc, dstAcc) =>
+            source.ProcessPixelRows(_currentImage, (srcAcc, dstAcc) =>
             {
                 for (int y = 0; y < srcAcc.Height; y++)
                 {
@@ -225,8 +244,26 @@ public class ImageEditorService : IDisposable
         {
             // Dimensions changed (e.g. resize preview) — must reallocate
             _currentImage.Dispose();
-            _currentImage = _previewBase.Clone();
+            _currentImage = source.Clone();
         }
+    }
+
+    private Image<Rgba32> GetDenoisedBase(int radius)
+    {
+        if (_denoisedBase == null || _denoisedRadius != radius)
+        {
+            _denoisedBase?.Dispose();
+            // Median rather than Gaussian: it drops speckle without smearing edges.
+            _denoisedBase = _previewBase!.Clone(x => x.MedianBlur(radius, preserveAlpha: true));
+            _denoisedRadius = radius;
+        }
+        return _denoisedBase;
+    }
+
+    private void ClearDenoisedBase()
+    {
+        _denoisedBase?.Dispose();
+        _denoisedBase = null;
     }
 
     public void CommitPreview()
@@ -234,6 +271,7 @@ public class ImageEditorService : IDisposable
         if (_previewBase == null) return;
         PushUndo(_previewBase);
         _previewBase = null;
+        ClearDenoisedBase();
     }
 
     public void DiscardPreviewBase()
@@ -242,6 +280,7 @@ public class ImageEditorService : IDisposable
         _currentImage?.Dispose();
         _currentImage = _previewBase;
         _previewBase = null;
+        ClearDenoisedBase();
     }
 
     // --- Single-pass adjustments (combines brightness, contrast, saturation, hue, gamma) ---
@@ -393,6 +432,16 @@ public class ImageEditorService : IDisposable
             v = p;
 
         return (byte)Math.Clamp((int)(v * 255f + 0.5f), 0, 255);
+    }
+
+    /// <summary>Sharpens by <paramref name="amount"/>, from 0 (none) to 1 (strongest).</summary>
+    public void SharpenNoUndo(float amount)
+    {
+        if (_currentImage == null || amount <= 0.01f) return;
+        // GaussianSharpen has no visible effect below sigma 0.3 and levels off past 1.5,
+        // so spread the slider across just that range.
+        float sigma = 0.3f + Math.Clamp(amount, 0f, 1f) * 1.2f;
+        _currentImage.Mutate(x => x.GaussianSharpen(sigma));
     }
 
     public void RotateNoUndo(float degrees)
@@ -625,5 +674,6 @@ public class ImageEditorService : IDisposable
         _currentImage?.Dispose();
         ClearUndoRing();
         _previewBase?.Dispose();
+        ClearDenoisedBase();
     }
 }

@@ -109,6 +109,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private double _saturationValue = 1.0;
     [ObservableProperty] private double _hueValue = 0;
     [ObservableProperty] private double _gammaValue = 1.0;
+    [ObservableProperty] private double _sharpenValue;
+    [ObservableProperty] private double _noiseReductionValue;
 
     // Crop rectangle
     [ObservableProperty] private int _cropX;
@@ -261,6 +263,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     partial void OnSaturationValueChanged(double value) => ScheduleAdjustmentPreview();
     partial void OnHueValueChanged(double value) => ScheduleAdjustmentPreview();
     partial void OnGammaValueChanged(double value) => ScheduleAdjustmentPreview();
+    partial void OnSharpenValueChanged(double value) => ScheduleAdjustmentPreview();
+    partial void OnNoiseReductionValueChanged(double value) => ScheduleAdjustmentPreview();
     partial void OnResizePercentageChanged(int value) => ScheduleResizePreview();
     partial void OnRotateDegreesChanged(double value) => ScheduleRotatePreview();
 
@@ -312,10 +316,13 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     private void UpdateAdjustmentPreviewCore()
     {
         if (_suppressPreviewUpdate || !IsAdjustMode || !_editor.HasPreviewBase) return;
-        _editor.RestoreFromPreviewBase();
+        // Denoise first and sharpen last, so sharpening never amplifies the noise
+        // or the tonal changes in between.
+        _editor.RestoreFromPreviewBase(NoiseReductionRadius);
         _editor.ApplyAdjustmentsNoUndo(
             (float)BrightnessValue, (float)ContrastValue, (float)SaturationValue,
             (float)HueValue, (float)GammaValue);
+        _editor.SharpenNoUndo((float)SharpenValue);
         RefreshDisplay();
     }
 
@@ -350,8 +357,12 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
             || Math.Abs(ContrastValue - 1.0) > 0.01
             || Math.Abs(SaturationValue - 1.0) > 0.01
             || Math.Abs(HueValue) > 0.5
-            || Math.Abs(GammaValue - 1.0) > 0.01;
+            || Math.Abs(GammaValue - 1.0) > 0.01
+            || SharpenValue > 0.01
+            || NoiseReductionRadius > 0;
     }
+
+    private int NoiseReductionRadius => (int)Math.Round(NoiseReductionValue);
 
     private void CommitPendingPreview()
     {
@@ -1698,6 +1709,8 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         SaturationValue = 1.0;
         HueValue = 0;
         GammaValue = 1.0;
+        SharpenValue = 0;
+        NoiseReductionValue = 0;
     }
 
     public void Dispose()

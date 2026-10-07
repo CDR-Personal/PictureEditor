@@ -170,6 +170,12 @@
                     <TextBlock Text="{Binding GammaValue, StringFormat='Gamma: {0:F2}'}"/>
                     <Slider Value="{Binding GammaValue}" Minimum="0.1" Maximum="3.0" TickFrequency="0.01"/>
 
+                    <TextBlock Text="{Binding SharpenValue, StringFormat='Sharpen: {0:F2}'}"/>
+                    <Slider Value="{Binding SharpenValue}" Minimum="0.0" Maximum="1.0" TickFrequency="0.01"/>
+
+                    <TextBlock Text="{Binding NoiseReductionValue, StringFormat='Noise reduction: {0:F0}'}"/>
+                    <Slider Value="{Binding NoiseReductionValue}" Minimum="0" Maximum="3" TickFrequency="1" IsSnapToTickEnabled="True"/>
+
                     <TextBlock Text="Changes apply in real-time. Escape to cancel." Opacity="0.5" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
                 </StackPanel>
             </ScrollViewer>
