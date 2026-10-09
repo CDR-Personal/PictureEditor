@@ -66,7 +66,7 @@ public partial class MainWindow : Window
         // Automatically show the folder picker when the window first opens
         Opened += OnWindowOpened;
 
-        // Track window for numbered hotkeys (1-9) and title-bar prefix.
+        // Track window for its switch hotkey (1-9, then letters) and title-bar prefix.
         Opened += (_, _) => App.RegisterWindow(this);
         Closed += (_, _) => App.UnregisterWindow(this);
     }
@@ -367,7 +367,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Zoom keys. Cmd/Ctrl-modified, so they can't collide with the bare-digit window
+        // Zoom keys. Cmd/Ctrl-modified, so they can't collide with the bare-key window
         // switching below (which requires KeyModifiers.None) or with Move-mode letters.
         if (!inputHasFocus && vm.HasImage &&
             (e.KeyModifiers.HasFlag(KeyModifiers.Meta) || e.KeyModifiers.HasFlag(KeyModifiers.Control)))
@@ -394,6 +394,17 @@ public partial class MainWindow : Window
 
         // Move-mode owns most keys when active. If it handles the key, stop here.
         if (vm.IsMoveMode && HandleMoveModeKey(vm, e, inputHasFocus)) return;
+
+        // Bare window key switches to that window; Option/Alt+key makes this window that one.
+        // The keys are 1-9 then letters Move mode doesn't use, so this is the same in both modes.
+        if (!inputHasFocus && e.KeyModifiers is KeyModifiers.None or KeyModifiers.Alt &&
+            App.WindowNumberFromKey(e.Key) is var number and > 0)
+        {
+            if (e.KeyModifiers == KeyModifiers.Alt) App.MoveWindowTo(this, number);
+            else App.ActivateWindow(number);
+            e.Handled = true;
+            return;
+        }
 
         switch (e.Key)
         {
@@ -519,42 +530,12 @@ public partial class MainWindow : Window
                     e.Handled = true;
                 }
                 break;
-            case Key.D1:
-            case Key.D2:
-            case Key.D3:
-            case Key.D4:
-            case Key.D5:
-            case Key.D6:
-            case Key.D7:
             case Key.D8:
-            case Key.D9:
-            case Key.NumPad1:
-            case Key.NumPad2:
-            case Key.NumPad3:
-            case Key.NumPad4:
-            case Key.NumPad5:
-            case Key.NumPad6:
-            case Key.NumPad7:
-            case Key.NumPad8:
-            case Key.NumPad9:
-                if (!inputHasFocus)
+                // Shift+8 in slideshow toggles shuffle (matches the * key).
+                if (!inputHasFocus && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && vm.IsContinuousMode)
                 {
-                    // Shift+8 in slideshow toggles shuffle (matches the * key).
-                    if (e.Key == Key.D8 && e.KeyModifiers.HasFlag(KeyModifiers.Shift) && vm.IsContinuousMode)
-                    {
-                        vm.ToggleShuffleMode();
-                        e.Handled = true;
-                    }
-                    else if (e.KeyModifiers is KeyModifiers.None or KeyModifiers.Alt)
-                    {
-                        int n = e.Key >= Key.NumPad1 && e.Key <= Key.NumPad9
-                            ? e.Key - Key.NumPad0
-                            : e.Key - Key.D0;
-                        // Bare digit switches to window N; Option/Alt+digit makes this window N.
-                        if (e.KeyModifiers == KeyModifiers.Alt) App.MoveWindowTo(this, n);
-                        else App.ActivateWindow(n);
-                        e.Handled = true;
-                    }
+                    vm.ToggleShuffleMode();
+                    e.Handled = true;
                 }
                 break;
         }
@@ -614,7 +595,7 @@ public partial class MainWindow : Window
         if (meta)
         {
             // Swallow Edit-only Cmd shortcuts so they don't fire the bound commands while
-            // in Move mode. Mode-agnostic shortcuts (Cmd+O, Cmd+W, Cmd+N, Cmd+J, Cmd+digits)
+            // in Move mode. Mode-agnostic shortcuts (Cmd+O, Cmd+W, Cmd+N, Cmd+J)
             // pass through.
             bool isEditOnly = e.Key switch
             {
@@ -691,7 +672,7 @@ public partial class MainWindow : Window
                 return true;
         }
 
-        // Common keys (Delete/Back, F2, F12, digits, Cmd+J, Cmd+N) fall through to the
+        // Common keys (Delete/Back, F2, F12, window keys, Cmd+J, Cmd+N) fall through to the
         // shared switch below — same behavior in both modes.
         return false;
     }
@@ -1011,6 +992,8 @@ public partial class MainWindow : Window
         var mod = isMac ? "Cmd" : "Ctrl";
         var alt = isMac ? "Option" : "Alt";
 
+        var windowLetters = string.Join(" ", Enumerable.Range(10, App.MaxWindows - 9).Select(App.WindowLabel));
+
         var hotkeys = new (string Key, string Description)[]
         {
             ($"{mod}+N", "New Window"),
@@ -1028,7 +1011,8 @@ public partial class MainWindow : Window
             ($"{mod}+T", "Sort Images"),
             ($"{mod}+W", "Close Window"),
             ("1 \u2013 9", "Activate Window 1\u20139"),
-            ($"{alt}+1 \u2013 9", "Move This Window to 1\u20139"),
+            ($"{windowLetters}", "Activate Window 10\u201320"),
+            ($"{alt}+window key", "Move This Window to That Number"),
             ("0 \u2013 9", "Pick a layout (startup chooser)"),
             ("Left / Right", "Navigate Images"),
             ("Up / Down", "Fine Rotate (in rotate mode)"),

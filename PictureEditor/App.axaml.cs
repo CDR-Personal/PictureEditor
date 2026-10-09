@@ -34,6 +34,32 @@ public partial class App : Application
     // Open MainWindows in the order they were opened. Index 0 == window "1".
     private static readonly List<MainWindow> _openWindows = new();
 
+    /// <summary>The most editor windows that can be open at once — one per window key.</summary>
+    public const int MaxWindows = 20;
+
+    // Keys for windows 10-20. Not A-K: Move mode files images on bare A, D, E, J, L, N, P,
+    // S, T, U, Y and Z, and Option+E/I/N/U are macOS dead keys, so those letters are skipped.
+    private const string WindowLetters = "BCFGHKMOQRV";
+
+    /// <summary>The key that names window <paramref name="number"/>: "1"-"9", then a letter.</summary>
+    public static string WindowLabel(int number) => number switch
+    {
+        >= 1 and <= 9 => number.ToString(),
+        >= 10 and <= MaxWindows => WindowLetters[number - 10].ToString(),
+        _ => ""
+    };
+
+    /// <summary>The window number a key stands for (1-based); -1 for anything else.</summary>
+    public static int WindowNumberFromKey(Key key)
+    {
+        int digit = DigitFromKey(key);
+        if (digit > 0) return digit;
+        if (key is < Key.A or > Key.Z) return -1;
+
+        int letter = WindowLetters.IndexOf((char)('A' + (key - Key.A)));
+        return letter < 0 ? -1 : letter + 10;
+    }
+
     private static LayoutStore? _layouts;
 
     /// <summary>The user's named screen layouts, loaded once per run.</summary>
@@ -163,9 +189,17 @@ public partial class App : Application
 
     /// <summary>
     /// Creates a new editor window, optionally loading the given file or directory.
+    /// Returns null, after telling the user, when <see cref="MaxWindows"/> are already open.
     /// </summary>
-    public static MainWindow CreateNewWindow(string? filePath = null, Window? sourceWindow = null)
+    public static MainWindow? CreateNewWindow(string? filePath = null, Window? sourceWindow = null)
     {
+        if (_openWindows.Count >= MaxWindows)
+        {
+            _ = ShowInfoDialog(sourceWindow, "Window Limit",
+                $"{MaxWindows} windows are already open. Close one to open another.");
+            return null;
+        }
+
         var vm = new MainWindowViewModel();
         if (filePath != null)
             vm.StartupFilePath = filePath;
@@ -259,6 +293,10 @@ public partial class App : Application
         if (entries.Count == 0)
             return;
 
+        // Only a hand-edited layout can hold more windows than there are window keys.
+        if (entries.Count > MaxWindows)
+            entries = entries.Take(MaxWindows).ToList();
+
         // Build every window up front: Screens is readable from a constructed window
         // before it is shown, and we need the monitor list to decide what to show.
         var pending = entries
@@ -276,7 +314,7 @@ public partial class App : Application
             (FindScreen(screens, item.Layout) != null ? ready : homeless).Add(item);
 
         // Show in saved order — RegisterWindow fires on Opened, so show order is what
-        // assigns the 1-9 window numbers.
+        // assigns the window numbers.
         foreach (var (l, w) in ready)
         {
             w.ApplyLayout(l);

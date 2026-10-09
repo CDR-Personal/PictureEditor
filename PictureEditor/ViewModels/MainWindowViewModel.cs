@@ -1564,7 +1564,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         var modified = _hasUnsavedChanges ? " *" : "";
         var counter = BuildCounter();
         var status = _titleStatus != null ? $" — {_titleStatus}" : "";
-        var winNum = WindowNumber > 0 ? $"({WindowNumber}) " : "";
+        var winNum = WindowNumber > 0 ? $"({App.WindowLabel(WindowNumber)}) " : "";
         var modePrefix = IsMoveMode ? (IsSingleMoveMode ? "[MOVE 1] " : "[MOVE] ") : "";
         Title = $"{winNum}{modePrefix}Cedar Image Editor - {name}{fileSize}{modified}{counter}{status}";
     }
